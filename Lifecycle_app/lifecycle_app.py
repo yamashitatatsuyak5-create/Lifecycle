@@ -34,20 +34,20 @@ div.stButton>button{border-radius:12px!important;font-weight:bold!important;}
 }
 
 /* ============================================ */
-/* selectbox / date_input / time_input の */
-/* キーボード非表示 CSS */
+/* selectbox のキーボード非表示（pointer-events なし） */
 /* ============================================ */
 
-/* フォーカス前：pointer-events:none でタップ反応を遅延 */
+/* input を readonly に */
 div[data-testid^="stSelect"] input,
 div[data-testid^="stDateInput"] input,
 div[data-testid^="stTimeInput"] input {
-    pointer-events: none !important;
     -webkit-user-select: none !important;
     user-select: none !important;
+    outline: none !important;
+    caret-color: transparent !important;
 }
 
-/* フォーカス時：キーボード画面を画面外に隠す */
+/* フォーカス時：キーボードを画面外に隠す */
 div[data-testid^="stSelect"] input:focus,
 div[data-testid^="stDateInput"] input:focus,
 div[data-testid^="stTimeInput"] input:focus {
@@ -56,62 +56,56 @@ div[data-testid^="stTimeInput"] input:focus {
     top: -10000px !important;
     opacity: 0 !important;
     clip-path: inset(9999px) !important;
-    pointer-events: none !important;
-    caret-color: transparent !important;
 }
 
-/* iOS Safari 特有：VirtualKeyboard が起動しても見えない */
+/* iOS Safari 特有対策 */
 @supports (-webkit-touch-callout: none) {
-    input {
-        font-size: 16px !important;
-        position: absolute !important;
-        left: -10000px !important;
+    div[data-testid^="stSelect"] input:focus,
+    div[data-testid^="stDateInput"] input:focus,
+    div[data-testid^="stTimeInput"] input:focus {
+        position: fixed !important;
+        left: -9999px !important;
+        top: -9999px !important;
+        font-size: 0 !important;
+        border: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
     }
 }
 
-/* Android Chrome：キーボード領域を画面外に */
-@media (max-width: 768px) {
+/* Android Chrome 対策 */
+@media (max-width: 768px) and (min-width: 320px) {
     input[type="text"]:focus {
         position: fixed !important;
         bottom: -10000px !important;
         left: -10000px !important;
     }
 }
-
-/* iPhone notch 対応：safe-area を無視してキーボードを隠す */
-@supports (padding: max(0px)) {
-    div[data-testid^="stSelect"] input,
-    div[data-testid^="stDateInput"] input,
-    div[data-testid^="stTimeInput"] input {
-        bottom: -10000px !important;
-    }
-}
 </style>
 
 <script>
-/* 念押し：フォーカスが当たったら即座に blur + click でドロップダウンを開く */
 (function(){
     
-    // フォーカス監視
-    const killFocus = () => {
+    // フォーカスが当たった input を即座に blur
+    const monitorFocus = () => {
         setInterval(() => {
             const active = document.activeElement;
             if (!active || active.tagName !== 'INPUT') return;
             
-            const isTarget = 
+            const isSelectInput = 
                 active.closest('div[data-testid^="stSelect"]')    ||
                 active.closest('div[data-testid^="stDateInput"]') ||
                 active.closest('div[data-testid^="stTimeInput"]');
             
-            if (isTarget) {
+            if (isSelectInput) {
                 active.blur();
-                isTarget.click();
+                isSelectInput.click();
             }
         }, 50);
     };
     
-    // タップ時の処理
-    const interceptTaps = () => {
+    // タップ時にドロップダウンを開く
+    const setupClickHandlers = () => {
         const q = `
             div[data-testid^="stSelect"],
             div[data-testid^="stDateInput"],
@@ -120,20 +114,28 @@ div[data-testid^="stTimeInput"] input:focus {
         document.addEventListener('touchstart', (e) => {
             const target = e.target.closest(q);
             if (target) {
-                e.preventDefault();
-                target.querySelectorAll('input').forEach(inp => inp.blur());
+                target.querySelectorAll('input').forEach(inp => {
+                    inp.readOnly = true;
+                    inp.inputMode = 'none';
+                });
                 target.click();
             }
-        }, { capture: true, passive: false });
+        }, { passive: true });
     };
     
     // 実行
-    killFocus();
-    interceptTaps();
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            monitorFocus();
+            setupClickHandlers();
+        });
+    } else {
+        monitorFocus();
+        setupClickHandlers();
+    }
 })();
 </script>
 """, unsafe_allow_html=True)
-
 # -------------------------------------------------
 # 定数 & ユーティリティ
 # -------------------------------------------------
