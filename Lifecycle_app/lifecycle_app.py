@@ -170,7 +170,7 @@ current_weekday = WEEKDAYS[st.session_state.target_date.weekday()]
 st.markdown(f"<div style='text-align: center; font-size: 0.95rem; font-weight: bold; margin-bottom: 10px;'>{date_str} ({current_weekday})</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 📊 タイムライン・グラフエリア（復活・下側引き出し線版）
+# 📊 タイムライン・グラフエリア（入り切らない時だけ引き出し線版）
 # ==========================================
 if not ui_log.empty:
     df = ui_log.copy()
@@ -187,55 +187,64 @@ if not ui_log.empty:
         # 開始時刻順に並び替え
         df_day = df_day.sort_values("開始時刻")
         
-        # 横棒グラフの作成（棒の中には文字を入れず、色だけにします）
+        # 横棒グラフの作成
         fig = px.timeline(
             df_day, x_start="Start_dt", x_end="End_dt", y="日付", color="カテゴリ", 
-            hover_name="内容", height=160, color_discrete_map=dynamic_colors
+            text="カテゴリ", hover_name="内容", height=150, color_discrete_map=dynamic_colors
         )
         
-        fig.update_traces(marker_line_width=0)
+        # 🚨 基本は「文字サイズ14px」で棒の「内側」に表示する。
+        # 入り切らない（文字が小さくなりすぎる）場合は、自動的に文字を非表示（hidden）にする設定
+        fig.update_traces(
+            textposition='inside', 
+            insidetextanchor='middle', 
+            textfont=dict(size=14, color="#1C1E21"),
+            constraintext='hide', # 👈 ココ！入り切らない時は文字を潰さず、一旦隠す
+            marker_line_width=0
+        )
         
-        # 🚨 引き出し線の配置ロジック（タイムラインの文字座標に対応）
+        # 🚨 隠された（＝時間が短すぎる）項目だけを判定して、引き出し線を伸ばす
         annotations = []
         for i, (_, row) in enumerate(df_day.iterrows()):
-            # 予定の真ん中の時間を計算
-            mid_dt = row["Start_dt"] + (row["End_dt"] - row["Start_dt"]) / 2
+            # 1マスの時間（分）を計算
+            duration_minutes = (row["End_dt"] - row["Start_dt"]).total_seconds() / 60.0
             
-            # 交互に高さを変えて、下側にジグザグに線を伸ばす（文字の重なり防止）
-            # 偶数番目は少し浅め、奇数番目は少し深めに下に伸ばします
-            ay_val = 30 if (i % 2 == 0) else 65
-            
-            # 表示する文字（カテゴリ名と開始時間）
-            display_text = f"<b>{row['カテゴリ']}</b><br><span style='font-size:11px; color:#666;'>{row['開始時刻']}~</span>"
-            
-            annotations.append(dict(
-                x=mid_dt,                          # 線の出発点（時間軸）
-                y=date_str,                        # 🚨 線の出発点（日付文字列を指定することでグラフ消失を解決！）
-                xref="x", yref="y",
-                text=display_text,                 # 表示するテキスト
-                showarrow=True,                    # 引き出し線を表示する
-                arrowhead=2,                       # 線の矢印の形
-                arrowsize=1,
-                arrowwidth=1.2,
-                arrowcolor="#999999",              # 引き出し線の色
-                ax=0,                              # 真下に真っ直ぐ伸ばす
-                ay=ay_val,                         # 下方向への線の長さ
-                font=dict(size=12, color="#1C1E21"), # 文字の大きさ
-                bgcolor="rgba(255, 255, 255, 0.9)", # 背景を白くして文字を読みやすく
-                bordercolor="rgba(0,0,0,0.1)",
-                borderwidth=1,
-                borderpad=3
-            ))
+            # 目安として「45分未満」の短い予定は文字が潰れるので、引き出し線を出す
+            if duration_minutes < 45:
+                mid_dt = row["Start_dt"] + (row["End_dt"] - row["Start_dt"]) / 2
+                
+                # 線が被らないように、交互に長さを変えて下に伸ばす
+                ay_val = 35 if (i % 2 == 0) else 65
+                display_text = f"<b>{row['カテゴリ']}</b> <span style='font-size:11px; color:#666;'>{row['開始時刻']}~</span>"
+                
+                annotations.append(dict(
+                    x=mid_dt,
+                    y=date_str,
+                    xref="x", yref="y",
+                    text=display_text,
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowsize=1,
+                    arrowwidth=1.2,
+                    arrowcolor="#999999",
+                    ax=0,
+                    ay=ay_val,
+                    font=dict(size=12, color="#1C1E21"),
+                    bgcolor="rgba(255, 255, 255, 0.9)",
+                    bordercolor="rgba(0,0,0,0.1)",
+                    borderwidth=1,
+                    borderpad=3
+                ))
             
         fig.update_layout(
             xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True, tickfont=dict(color="#555", size=13, weight="bold")),
             yaxis=dict(title="", showticklabels=False, fixedrange=True),
             showlegend=False, 
             dragmode=False, 
-            margin=dict(l=10, r=10, t=10, b=80), # 🚨 下側に文字が出るので、下の余白（b）を大きく確保
+            margin=dict(l=10, r=10, t=10, b=75), # 下側に引き出し線が出るので余白を確保
             plot_bgcolor='rgba(0,0,0,0)', 
             paper_bgcolor='rgba(0,0,0,0)',
-            annotations=annotations              # 引き出し線を合体
+            annotations=annotations # 判定した引き出し線だけを合体
         )
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
