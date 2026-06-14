@@ -44,19 +44,17 @@ st.markdown("""
 DATA_FILE = "timeline_data.csv"
 ROUTINE_FILE = "timeline_routine.csv"
 TRACKING_FILE = "timeline_tracking.json"
-CATEGORIES_FILE = "timeline_categories.json" # 💡 新規：カテゴリ保存用
+CATEGORIES_FILE = "timeline_categories.json"
 
 WEEKDAYS = ["月", "火", "水", "木", "金", "土", "日"]
 DEFAULT_CATEGORIES = ["睡眠 🛌", "大学（講義・研究） 📝", "自主学習 ✏️", "バイト 💼", "移動・通学 🚶", "趣味・娯楽 🎮", "食事・生活 🍳", "その他 💬"]
 
-# 💡 カテゴリを自動で可愛く色分けするためのカラーパレット（無限に使い回せます）
 PASTEL_PALETTE = [
     "#B3E5FC", "#C8E6C9", "#FFF59D", "#FFE0B2", "#E1BEE7", 
     "#FFCDD2", "#F8BBD0", "#CFD8DC", "#D7CCC8", "#FFE082", 
     "#80DEEA", "#A5D6A7", "#CE93D8", "#F48FB1", "#90CAF9"
 ]
 
-# --- データの読み書き関数 ---
 def load_categories():
     if os.path.exists(CATEGORIES_FILE):
         with open(CATEGORIES_FILE, "r", encoding="utf-8") as f:
@@ -77,17 +75,14 @@ def load_data(file_path, default_columns):
 def save_data(df, file_path):
     df.to_csv(file_path, index=False, encoding="utf-8-sig")
 
-# --- セッションステート初期化 ---
 if "categories" not in st.session_state: st.session_state.categories = load_categories()
 if "df_log" not in st.session_state: st.session_state.df_log = load_data(DATA_FILE, ["日付", "開始時刻", "終了時刻", "カテゴリ", "内容"])
 if "df_routine" not in st.session_state: st.session_state.df_routine = load_data(ROUTINE_FILE, ["曜日", "開始時刻", "終了時刻", "カテゴリ", "内容"])
 if "target_date" not in st.session_state: st.session_state.target_date = datetime.now().date()
 if "app_mode" not in st.session_state: st.session_state.app_mode = "⏱️ 計測"
 
-# 💡 現在のカテゴリリストに合わせて動的にカラーマップを作成
 dynamic_colors = {cat: PASTEL_PALETTE[i % len(PASTEL_PALETTE)] for i, cat in enumerate(st.session_state.categories)}
 
-# --- ストップウォッチ・重複チェック関数 ---
 def get_tracking_state():
     if os.path.exists(TRACKING_FILE):
         with open(TRACKING_FILE, "r", encoding="utf-8") as f:
@@ -130,15 +125,12 @@ st.markdown("<h2 style='text-align: center; font-size: 1.5rem; margin-bottom: 0;
 
 c1, c2, c3 = st.columns([1, 2, 1])
 with c1:
-    if st.button("◀ 前日", use_container_width=True):
-        st.session_state.target_date -= timedelta(days=1); st.rerun()
+    if st.button("◀ 前日", use_container_width=True): st.session_state.target_date -= timedelta(days=1); st.rerun()
 with c2:
     selected_date = st.date_input("日付", st.session_state.target_date, label_visibility="collapsed")
-    if selected_date != st.session_state.target_date:
-        st.session_state.target_date = selected_date; st.rerun()
+    if selected_date != st.session_state.target_date: st.session_state.target_date = selected_date; st.rerun()
 with c3:
-    if st.button("翌日 ▶", use_container_width=True):
-        st.session_state.target_date += timedelta(days=1); st.rerun()
+    if st.button("翌日 ▶", use_container_width=True): st.session_state.target_date += timedelta(days=1); st.rerun()
 
 date_str = st.session_state.target_date.strftime("%Y-%m-%d")
 current_weekday = WEEKDAYS[st.session_state.target_date.weekday()]
@@ -163,7 +155,7 @@ if not st.session_state.df_log.empty:
     if not df_day.empty:
         fig = px.timeline(
             df_day, x_start="Start_dt", x_end="End_dt", y="日付", color="カテゴリ", 
-            text="カテゴリ", hover_name="内容", height=130, color_discrete_map=dynamic_colors # 💡 動的カラーマップを使用
+            text="カテゴリ", hover_name="内容", height=130, color_discrete_map=dynamic_colors
         )
         fig.update_traces(textposition='inside', insidetextanchor='middle', textfont_color="#333", marker_line_width=0)
         fig.update_layout(
@@ -198,7 +190,6 @@ with m2:
 with m3:
     if st.button("📊 分析", type="primary" if st.session_state.app_mode == "📊 分析" else "secondary", use_container_width=True): change_mode("📊 分析"); st.rerun()
 
-# 💡 新機能「🏷️ カテゴリ」を追加し、2段目も綺麗に3つに揃えました！
 m4, m5, m6 = st.columns(3)
 with m4:
     if st.button("⚙️ 固定", type="primary" if st.session_state.app_mode == "⚙️ 固定" else "secondary", use_container_width=True): change_mode("⚙️ 固定"); st.rerun()
@@ -211,12 +202,11 @@ st.markdown("<br>", unsafe_allow_html=True)
 mode = st.session_state.app_mode
 
 # ----------------------------
-# ⏱️ 計測モード
+# 各種モードの処理
 # ----------------------------
 if mode == "⏱️ 計測":
     if current_start is None:
-        if not st.session_state.categories:
-            st.warning("カテゴリがありません。「🏷️ カテゴリ」から追加してください。")
+        if not st.session_state.categories: st.warning("カテゴリがありません。「🏷️ カテゴリ」から追加してください。")
         else:
             rt_cat = st.selectbox("カテゴリを選ぶ", st.session_state.categories, key="rt_cat")
             if st.button("▶️ 今からスタート！", type="primary", use_container_width=True):
@@ -249,15 +239,10 @@ if mode == "⏱️ 計測":
                 st.rerun()
                 
         if st.button("❌ 計測をキャンセル", use_container_width=True):
-            clear_tracking_state()
-            st.rerun()
+            clear_tracking_state(); st.rerun()
 
-# ----------------------------
-# 📝 追加モード
-# ----------------------------
 elif mode == "📝 追加":
-    if not st.session_state.categories:
-        st.warning("カテゴリがありません。「🏷️ カテゴリ」から追加してください。")
+    if not st.session_state.categories: st.warning("カテゴリがありません。「🏷️ カテゴリ」から追加してください。")
     else:
         category = st.selectbox("カテゴリ", st.session_state.categories, key="man_cat")
         col3, col4 = st.columns(2)
@@ -295,9 +280,6 @@ elif mode == "📝 追加":
                 save_data(st.session_state.df_log, DATA_FILE)
                 st.rerun()
 
-# ----------------------------
-# 📊 分析モード
-# ----------------------------
 elif mode == "📊 分析":
     st.markdown("#### 時間の使い方のバランス")
     period = st.selectbox("分析する期間", ["過去7日間", "過去30日間", "全期間", "今日"])
@@ -316,28 +298,19 @@ elif mode == "📊 分析":
             sum_df = df_filtered.groupby("カテゴリ")["時間（h）"].sum().reset_index()
             total_hours = round(sum_df["時間（h）"].sum(), 1)
             
-            fig_pie = px.pie(
-                sum_df, values='時間（h）', names='カテゴリ', color='カテゴリ', 
-                color_discrete_map=dynamic_colors, hole=0.4 # 💡 動的カラーマップを使用
-            )
+            fig_pie = px.pie(sum_df, values='時間（h）', names='カテゴリ', color='カテゴリ', color_discrete_map=dynamic_colors, hole=0.4)
             fig_pie.update_traces(textinfo='percent+label', textposition='inside', insidetextorientation='horizontal', marker_line_width=0)
             fig_pie.add_annotation(text=f"<b>計 {total_hours}h</b>", x=0.5, y=0.5, font_size=18, showarrow=False)
             fig_pie.update_layout(showlegend=False, margin=dict(t=10, b=10, l=10, r=10), height=300, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
             
             st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
             st.info(f"💡 「{period}」の合計記録時間は **{total_hours} 時間** です。")
-        else:
-            st.warning("この期間の記録はありません。")
-    else:
-        st.write("データがありません。")
+        else: st.warning("この期間の記録はありません。")
+    else: st.write("データがありません。")
 
-# ----------------------------
-# ⚙️ 固定モード
-# ----------------------------
 elif mode == "⚙️ 固定":
     st.markdown("#### 新規追加")
-    if not st.session_state.categories:
-        st.warning("カテゴリがありません。「🏷️ カテゴリ」から追加してください。")
+    if not st.session_state.categories: st.warning("カテゴリがありません。「🏷️ カテゴリ」から追加してください。")
     else:
         r_col1, r_col2 = st.columns(2)
         with r_col1: r_day = st.selectbox("曜日", WEEKDAYS)
@@ -351,8 +324,7 @@ elif mode == "⚙️ 固定":
             new_routine = pd.DataFrame([{"曜日": r_day, "開始時刻": r_start.strftime("%H:%M"), "終了時刻": r_end.strftime("%H:%M"), "カテゴリ": r_cat, "内容": r_detail if r_detail else "（未入力）"}])
             st.session_state.df_routine = pd.concat([st.session_state.df_routine, new_routine], ignore_index=True)
             save_data(st.session_state.df_routine, ROUTINE_FILE)
-            st.success("追加しました！")
-            st.rerun()
+            st.success("追加しました！"); st.rerun()
 
     st.markdown("#### 登録済み一覧")
     if st.session_state.df_routine.empty: st.write("登録されていません。")
@@ -370,12 +342,8 @@ elif mode == "⚙️ 固定":
                     st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
-# ----------------------------
-# 📜 削除モード
-# ----------------------------
 elif mode == "📜 削除":
     st.markdown(f"#### {date_str} の記録")
-    
     if not st.session_state.df_log.empty:
         df_edit_target = st.session_state.df_log[st.session_state.df_log["日付"] == date_str]
         if df_edit_target.empty: st.write("今日の記録はありません。")
@@ -392,33 +360,29 @@ elif mode == "📜 削除":
                         save_data(st.session_state.df_log, DATA_FILE)
                         st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
-    else:
-        st.write("データがありません。")
+    else: st.write("データがありません。")
 
 # ----------------------------
-# 🏷️ カテゴリ編集モード（💡完全新機能！）
+# 🏷️ カテゴリ編集モード（💡 バグ修正済み！）
 # ----------------------------
 elif mode == "🏷️ カテゴリ":
     st.markdown("#### カテゴリの編集")
-    st.info("💡 グラフの色は自動で可愛く割り当てられます。\n表の下の「＋」で追加、行を選択して「Delete」で削除できます。")
+    st.info("💡 表の下の「＋」で追加できます。\n⚠️ 編集が終わったら、必ず下の**「保存ボタン」**を押してください。")
     
-    # リストを編集しやすいようにDataFrameに変換
     df_cat = pd.DataFrame(st.session_state.categories, columns=["カテゴリ名"])
+    edited_df_cat = st.data_editor(df_cat, num_rows="dynamic", use_container_width=True, key="cat_editor")
     
-    edited_df_cat = st.data_editor(
-        df_cat,
-        num_rows="dynamic",
-        use_container_width=True,
-        key="cat_editor"
-    )
-    
-    # 変更があったら保存してアプリ全体に反映！
-    if not edited_df_cat.equals(df_cat):
-        # 空白を消したり、重複を整理してリストに戻す
-        new_cats = edited_df_cat["カテゴリ名"].dropna().str.strip().tolist()
-        new_cats = [c for c in new_cats if c != ""]
+    # 💡 無限ループ（白画面）防止のため、保存を「手動ボタン」に変更しました！
+    if st.button("💾 変更を保存する", type="primary", use_container_width=True):
+        # 入力された文字を綺麗に整理する安全な処理
+        new_cats = edited_df_cat["カテゴリ名"].dropna().astype(str).str.strip().tolist()
+        new_cats = [c for c in new_cats if c != "" and c != "None"]
         new_cats = list(dict.fromkeys(new_cats)) # 重複を削除
         
-        st.session_state.categories = new_cats
-        save_categories(new_cats)
-        st.rerun()
+        if len(new_cats) > 0:
+            st.session_state.categories = new_cats
+            save_categories(new_cats)
+            st.success("カテゴリを保存しました！")
+            st.rerun()
+        else:
+            st.error("⚠️ 最低1つのカテゴリが必要です。")
