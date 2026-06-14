@@ -11,8 +11,6 @@ st.set_page_config(page_title="ライフログ", layout="wide", initial_sidebar_
 # ==========================================
 # 🔑 Supabase（データベース）接続設定
 # ==========================================
-# 🚨 以下の2行の "" の中に、取得したURLと鍵を貼り付けてください！🚨
-
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
@@ -191,10 +189,12 @@ if not ui_log.empty:
             text="カテゴリ", hover_name="内容", height=130, color_discrete_map=dynamic_colors
         )
         fig.update_traces(textposition='inside', insidetextanchor='middle', textfont_color="#333", marker_line_width=0)
+        # 💡 横棒グラフ（タイムライン）の文字サイズもここで「13px」に大きく固定して読みやすくしました
         fig.update_layout(
             xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True, tickfont=dict(color="#555", weight="bold")),
             yaxis=dict(title="", showticklabels=False, fixedrange=True),
-            showlegend=False, dragmode=False, margin=dict(l=0, r=0, t=0, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
+            showlegend=False, dragmode=False, margin=dict(l=0, r=0, t=0, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(size=13)
         )
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
@@ -334,10 +334,28 @@ elif mode == "📊 分析":
             sum_df = df_filtered.groupby("カテゴリ")["時間（h）"].sum().reset_index()
             total_hours = round(sum_df["時間（h）"].sum(), 1)
             
+            # 🚨 【解決策1】 割合の小さな項目でも潰れないように円グラフの設定を大幅に強化しました！
             fig_pie = px.pie(sum_df, values='時間（h）', names='カテゴリ', color='カテゴリ', color_discrete_map=dynamic_colors, hole=0.4)
-            fig_pie.update_traces(textinfo='percent+label', textposition='inside', insidetextorientation='horizontal', marker_line_width=0)
+            
+            # 文字の位置を「外側（outside）」に強制し、勝手に文字が小さくなるのをストップ
+            fig_pie.update_traces(
+                textinfo='percent+label', 
+                textposition='outside', 
+                marker_line_width=0
+            )
+            
+            # 真ん中の合計時間表示
             fig_pie.add_annotation(text=f"<b>計 {total_hours}h</b>", x=0.5, y=0.5, font_size=18, showarrow=False)
-            fig_pie.update_layout(showlegend=False, margin=dict(t=10, b=10, l=10, r=10), height=300, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+            
+            # 外側の文字が画面からはみ出さないように、余白（margin）とグラフ全体の高さ（height）をゆったり広げ、全体の文字サイズを14pxに固定しました
+            fig_pie.update_layout(
+                showlegend=False, 
+                margin=dict(t=40, b=40, l=40, r=40), 
+                height=380, 
+                plot_bgcolor='rgba(0,0,0,0)', 
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(size=14)
+            )
             
             st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
             st.info(f"💡 「{period}」の合計記録時間は **{total_hours} 時間** です。")
