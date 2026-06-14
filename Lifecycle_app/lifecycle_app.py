@@ -35,41 +35,56 @@ div.stButton>button{border-radius:12px!important;font-weight:bold!important;}
 </style>
 
 <script>
-// モバイルのキーボードを完全に抑止するスクリプト
-function killMobileKeyboard () {
+function lockStreamlitInputs() {
 
-  const lockAll = () => {
+  const process = () => {
+    // selectbox / date_input / time_input の “検索 input”
     const q = `
       div[data-testid^="stSelect"]    input,
       div[data-testid^="stDateInput"] input,
-      div[data-testid^="stTimeInput"] input
-    `;
+      div[data-testid^="stTimeInput"] input`;
     const inputs = window.parent.document.querySelectorAll(q);
 
     inputs.forEach(inp=>{
-      if(inp.dataset.keyboardLocked) return;     // 処理済み
+      if (inp.dataset.locked) return;          // 既に処理済み
 
-      inp.readOnly  = true;          // 物理入力不可
-      inp.inputMode = 'none';        // ソフト KB 抑止
-      inp.style.caretColor='transparent';
+      // 1) 物理入力／ソフト KB を根本的に無効化
+      inp.readOnly  = true;
+      inp.inputMode = 'none';
+      inp.style.caretColor = 'transparent';
 
+      // 2) フォーカスが当たる「前」に止める
+      const openDropdown = () => {
+        const combo = inp.closest('div[role="combobox"]');
+        if (combo) combo.click();              // ドロップダウンを開く
+      };
+
+      // iOS Safari = touchstart, Android Chrome = mousedown が最初に発火
+      ['touchstart','mousedown'].forEach(evt=>{
+        inp.addEventListener(evt, e=>{
+          e.preventDefault();                  // フォーカスさせない
+          openDropdown();
+        }, {passive:false});
+      });
+
+      // 念のため focus しても瞬時に blur
       inp.addEventListener('focus', ()=>inp.blur(), {passive:true});
-      inp.dataset.keyboardLocked = 'true';
+
+      inp.dataset.locked = 'true';
     });
   };
 
-  // 初回
-  lockAll();
-  // DOM 変化を監視
-  const obs = new MutationObserver(lockAll);
-  obs.observe(window.parent.document,{childList:true,subtree:true});
+  // 初回 & DOM 変化時
+  process();
+  new MutationObserver(process)
+    .observe(window.parent.document,{childList:true,subtree:true});
 }
 
-if(window.parent){
-  if(document.readyState==='loading'){
-    window.parent.addEventListener('DOMContentLoaded',killMobileKeyboard);
-  }else{
-    killMobileKeyboard();
+if (window.parent) {
+  if (document.readyState === 'loading') {
+    window.parent.addEventListener('DOMContentLoaded', lockStreamlitInputs);
+  } else {
+    lockStreamlitInputs();
   }
 }
 </script>
