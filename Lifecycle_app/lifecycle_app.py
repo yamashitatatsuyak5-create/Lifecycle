@@ -66,7 +66,7 @@ def hash_password(password):
 if "current_user" not in st.session_state: st.session_state.current_user = None
 
 if st.session_state.current_user is None:
-    st.markdown("<h2 style='text-align: center;'>🧸 ライフログ<br><small>ログイン</small></h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center;'>時間管理表<br><small>ログイン</small></h2>", unsafe_allow_html=True)
     tab_login, tab_signup = st.tabs(["ログイン", "新規登録"])
     
     with tab_login:
