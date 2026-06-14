@@ -13,22 +13,19 @@ st.set_page_config(page_title="ライフログ", layout="wide", initial_sidebar_
 # ==========================================
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-
-# Supabaseに接続
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ==========================================
-# 💅 スマホに特化した見やすいデザイン ＋ キーボード対策CSS
+# 💅 スマホに特化した見やすいデザイン
 # ==========================================
 st.markdown("""
 <style>
-    /* ヘッダーの非表示と画面の余白調整 */
     [data-testid="stHeader"] { visibility: hidden; }
     .block-container { padding-top: 1rem; padding-bottom: 5rem; }
     
-    /* ボタンのデザイン */
+    /* ボタンを丸く大きくしてスマホで押しやすく */
     div.stButton > button {
-        border-radius: 15px !important;
+        border-radius: 12px !important;
         font-weight: bold !important;
     }
     
@@ -40,20 +37,17 @@ st.markdown("""
         margin-bottom: 10px;
         border: 1px solid rgba(0, 0, 0, 0.1);
     }
-
-    /* 🚨 ラジオボタン（時間選択）を横並びにしてスマホで押しやすくするスタイル */
-    div[data-testid="stRadio"] > div {
-        flex-direction: row !important;
-        flex-wrap: wrap !important;
-        gap: 6px !important;
-    }
-    div[data-testid="stRadio"] label {
-        background-color: rgba(0,0,0,0.05);
-        padding: 6px 12px !important;
-        border-radius: 10px !important;
-        margin: 0 !important;
-        min-width: 45px;
+    
+    /* 🚨 時間表示用のでか文字スタイル */
+    .time-display {
+        font-size: 1.6rem;
+        font-weight: bold;
         text-align: center;
+        background-color: rgba(0, 0, 0, 0.05);
+        padding: 8px;
+        border-radius: 10px;
+        margin-bottom: 5px;
+        color: #1C1E21;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -72,9 +66,7 @@ if "current_user" not in st.session_state: st.session_state.current_user = None
 if st.session_state.current_user is None:
     st.markdown("<h2 style='text-align: center;'>時間管理表<br><small>ログイン</small></h2>", unsafe_allow_html=True)
     tab_login, tab_signup = st.tabs(["ログイン", "新規登録"])
-    
     with tab_login:
-        st.write("アカウントを持っている方はこちら👇")
         login_name = st.text_input("ユーザー名", key="login_name")
         login_pass = st.text_input("パスワード", type="password", key="login_pass")
         if st.button("ログイン", type="primary", use_container_width=True):
@@ -84,23 +76,18 @@ if st.session_state.current_user is None:
                 st.rerun()
             else:
                 st.error("ユーザー名かパスワードが違います。")
-                
     with tab_signup:
-        st.write("初めての方はこちら👇")
         signup_name = st.text_input("好きなユーザー名", key="signup_name")
         signup_pass = st.text_input("好きなパスワード", type="password", key="signup_pass")
         if st.button("アカウントを作成する", type="primary", use_container_width=True):
             res = supabase.table("users").select("*").eq("user_name", signup_name).execute()
-            if len(res.data) > 0:
-                st.error("⚠️ その名前はすでに誰かに使われています。")
+            if len(res.data) > 0: st.error("⚠️ その名前はすでに誰かに使われています。")
             elif signup_name and signup_pass:
                 supabase.table("users").insert({"user_name": signup_name, "password": hash_password(signup_pass)}).execute()
                 default_cats = ["睡眠 🛌", "大学（講義・研究） 📝", "自主学習 ✏️", "バイト 💼", "移動・通学 🚶", "趣味・娯楽 🎮", "食事・生活 🍳", "その他 💬"]
                 cat_inserts = [{"user_name": signup_name, "category_name": c} for c in default_cats]
                 supabase.table("timeline_categories").insert(cat_inserts).execute()
-                st.success("🎉 アカウントが完成しました！左のタブからログインしてください。")
-            else:
-                st.warning("ユーザー名とパスワードを入力してください。")
+                st.success("🎉 アカウント完成！ログインしてください。")
     st.stop()
 
 # ==========================================
@@ -111,11 +98,9 @@ user_name = st.session_state.current_user
 def load_db_data():
     res_cats = supabase.table("timeline_categories").select("category_name").eq("user_name", user_name).execute()
     st.session_state.categories = [row["category_name"] for row in res_cats.data] if res_cats.data else ["未設定"]
-    
     res_log = supabase.table("timeline_data").select("*").eq("user_name", user_name).execute()
     df_log = pd.DataFrame(res_log.data) if res_log.data else pd.DataFrame(columns=["id", "date", "start_time", "end_time", "category", "detail"])
     st.session_state.ui_log = df_log.rename(columns={"date": "日付", "start_time": "開始時刻", "end_time": "終了時刻", "category": "カテゴリ", "detail": "内容"})
-
     res_routine = supabase.table("timeline_routine").select("*").eq("user_name", user_name).execute()
     df_rt = pd.DataFrame(res_routine.data) if res_routine.data else pd.DataFrame(columns=["id", "weekday", "start_time", "end_time", "category", "detail"])
     st.session_state.ui_routine = df_rt.rename(columns={"weekday": "曜日", "start_time": "開始時刻", "end_time": "終了時刻", "category": "カテゴリ", "detail": "内容"})
@@ -137,30 +122,48 @@ if "tracking_cat" not in st.session_state: st.session_state.tracking_cat = None
 if "tracking_start" not in st.session_state: st.session_state.tracking_start = None
 if "editing_log_id" not in st.session_state: st.session_state.editing_log_id = None 
 
-# 🚨 キーボードを「絶対」に出さないための、時・分ラジオボタン用選択肢
-HOURS_OPTIONS = [f"{h:02d}" for h in range(24)]
-MINUTES_OPTIONS = ["00", "15", "30", "45"]
+# 🚨 【新設】時間を管理するセッション状態の初期化（15分単位のカウンター用）
+if "add_start_min" not in st.session_state: st.session_state.add_start_min = 540  # 09:00 (9時間×60分)
+if "add_end_min" not in st.session_state: st.session_state.add_end_min = 600      # 10:00 (10時間×60分)
+if "rt_start_min" not in st.session_state: st.session_state.rt_start_min = 540
+if "rt_end_min" not in st.session_state: st.session_state.rt_end_min = 600
 
-# 🚨 【新設】絶対キーボードが出ない時間選択UI関数
-def select_time_without_keyboard(label_prefix, default_h="09", default_m="00", key_suffix=""):
-    st.markdown(f"<small style='color:#555;font-weight:bold;'>{label_prefix}</small>", unsafe_allow_html=True)
-    c_h, c_m = st.columns([3, 2])
-    with c_h:
-        h_sel = st.radio("⏳ 時", HOURS_OPTIONS, index=HOURS_OPTIONS.index(default_h), key=f"h_{key_suffix}", label_visibility="collapsed")
-    with c_m:
-        m_sel = st.radio("分", MINUTES_OPTIONS, index=MINUTES_OPTIONS.index(default_m), key=f"m_{key_suffix}", label_visibility="collapsed")
-    return f"{h_sel}:{m_sel}"
+# 分（int）を "HH:MM" の文字列に変換するヘルパー関数
+def minutes_to_string(total_min):
+    total_min = total_min % 1440 # 24時間を超えたらループ
+    h = total_min // 60
+    m = total_min % 60
+    return f"{h:02d}:{m:02d}"
+
+# 🚨 【新設】キーボードが出ない「＋」「ー」進めるボタン式時間入力UI
+def time_counter_ui(label, state_key):
+    st.markdown(f"<small style='color:#555;font-weight:bold;'>{label}</small>", unsafe_allow_html=True)
+    current_val = st.session_state[state_key]
+    
+    # 時間をでっかく表示（HTML）
+    st.markdown(f"<div class='time-display'>{minutes_to_string(current_val)}</div>", unsafe_allow_html=True)
+    
+    # 横並びの「戻す」「進める」ボタン
+    cb1, cb2 = st.columns(2)
+    with cb1:
+        if st.button("ー 15分", key=f"minus_{state_key}", use_container_width=True):
+            st.session_state[state_key] = (current_val - 15) % 1440
+            st.rerun()
+    with cb2:
+        if st.button("＋ 15分", key=f"plus_{state_key}", use_container_width=True):
+            st.session_state[state_key] = (current_val + 15) % 1440
+            st.rerun()
+            
+    return minutes_to_string(st.session_state[state_key])
 
 def check_overlap(date_str, start_str, end_str, df_check_log, exclude_id=None):
     if df_check_log.empty: return False, None
     df_check = df_check_log.copy()
     if exclude_id is not None: df_check = df_check[df_check["id"] != exclude_id]
     if df_check.empty: return False, None
-    
     new_start = pd.to_datetime(f"{date_str} {start_str}")
     new_end = pd.to_datetime(f"{date_str} {end_str}")
     if new_end <= new_start: new_end += pd.Timedelta(days=1)
-    
     df_check["Start_dt"] = pd.to_datetime(df_check["日付"] + " " + df_check["開始時刻"])
     df_check["End_dt"] = pd.to_datetime(df_check["日付"] + " " + df_check["終了時刻"])
     df_check.loc[df_check["End_dt"] < df_check["Start_dt"], "End_dt"] += pd.Timedelta(days=1)
@@ -181,10 +184,8 @@ def merge_continuous_logs(df_target):
     df_m["End_dt"] = pd.to_datetime(df_m["日付"] + " " + df_m["終了時刻"])
     df_m.loc[df_m["End_dt"] < df_m["Start_dt"], "End_dt"] += pd.Timedelta(days=1)
     df_m = df_m.sort_values("Start_dt").reset_index(drop=True)
-    
     merged_rows = []
     current_row = df_m.iloc[0].to_dict()
-    
     for i in range(1, len(df_m)):
         next_row = df_m.iloc[i].to_dict()
         if current_row["End_dt"] == next_row["Start_dt"] and current_row["カテゴリ"] == next_row["カテゴリ"]:
@@ -196,12 +197,11 @@ def merge_continuous_logs(df_target):
         else:
             merged_rows.append(current_row)
             current_row = next_row
-            
     merged_rows.append(current_row)
     return pd.DataFrame(merged_rows)
 
 # ==========================================
-# 🗓️ 画面上部：カレンダー＆ログアウト
+# 🗓️ カレンダー＆ログアウト
 # ==========================================
 col_user, col_out = st.columns([3, 1])
 with col_user: st.markdown(f"**👤 {user_name}** さん")
@@ -226,12 +226,11 @@ current_weekday = WEEKDAYS[st.session_state.target_date.weekday()]
 st.markdown(f"<div style='text-align: center; font-size: 0.95rem; font-weight: bold; margin-bottom: 10px;'>{date_str} ({current_weekday})</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 📊 タイムライン・グラフエリア
+# 📊 タイムラインエリア
 # ==========================================
 if not ui_log.empty:
     df_raw = ui_log.copy()
     df_day_raw = df_raw[df_raw["日付"] == date_str].copy()
-    
     start_of_day = pd.to_datetime(f"{date_str} 00:00:00")
     end_of_day = start_of_day + pd.Timedelta(days=1)
     
@@ -262,12 +261,10 @@ if not ui_log.empty:
         fig = px.timeline(empty_df, x_start="Start_dt", x_end="End_dt", y="日付", height=130)
         fig.update_layout(xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True), yaxis=dict(title="", showticklabels=False, fixedrange=True), showlegend=False, dragmode=False, margin=dict(l=0, r=0, t=0, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-else:
-    st.info("まずは下のメニューから記録を追加してみましょう！ 🎈")
 st.markdown("---")
 
 # ==========================================
-# 📱 6つの特大ボタン・メニュー
+# 📱 メニューボタン
 # ==========================================
 def change_mode(new_mode): st.session_state.app_mode = new_mode
 
@@ -332,9 +329,12 @@ elif mode == "📝 追加":
     else:
         category = st.selectbox("カテゴリ", st.session_state.categories, key="man_cat")
         
-        # 🚨【絶対キーボードが出ないUI】ラジオボタン方式の2連選択
-        start_str = select_time_without_keyboard("🛫 開始時刻", "09", "00", "add_start")
-        end_str = select_time_without_keyboard("🛬 終了時刻", "10", "00", "add_end")
+        # 🚨【新・カウンター式UI】ボタンをタップして15分ずつ調整（キーボードは絶対に出ない）
+        col3, col4 = st.columns(2)
+        with col3: 
+            start_str = time_counter_ui("🛫 開始時刻", "add_start_min")
+        with col4: 
+            end_str = time_counter_ui("🛬 終了時刻", "add_end_min")
             
         detail = st.text_input("メモ", key="man_detail")
         
@@ -414,6 +414,15 @@ elif mode == "📜 編集・削除":
                     with c2:
                         if st.button("✏️", key=f"edit_btn_{row['id']}", use_container_width=True):
                             st.session_state.editing_log_id = row["id"]
+                            # 編集用にセッションのカウンターの初期値を合わせる
+                            try:
+                                sh, sm = map(int, row["開始時刻"].split(":"))
+                                eh, em = map(int, row["終了時刻"].split(":"))
+                                st.session_state[f"ed_s_min_{row['id']}"] = sh * 60 + sm
+                                st.session_state[f"ed_e_min_{row['id']}"] = eh * 60 + em
+                            except:
+                                st.session_state[f"ed_s_min_{row['id']}"] = 540
+                                st.session_state[f"ed_e_min_{row['id']}"] = 600
                             st.rerun()
                     with c3:
                         if st.button("🗑️", key=f"del_l_{row['id']}", use_container_width=True):
@@ -424,15 +433,13 @@ elif mode == "📜 編集・削除":
                     st.markdown("<p style='font-size:0.85rem; color:#f03e3e; font-weight:bold;'>📝 データを編集中...</p>", unsafe_allow_html=True)
                     edit_cat = st.selectbox("カテゴリ", st.session_state.categories, index=st.session_state.categories.index(row["カテゴリ"]) if row["カテゴリ"] in st.session_state.categories else 0, key=f"ed_cat_{row['id']}")
                     
-                    # 🚨【編集画面もキーボード完全ブロック】既存の値を時と分に分解して初期値にする
-                    try:
-                        sh_init, sm_init = row["開始時刻"].split(":")
-                        eh_init, em_init = row["終了時刻"].split(":")
-                    except:
-                        sh_init, sm_init, eh_init, em_init = "09", "00", "10", "00"
-                        
-                    new_s_str = select_time_without_keyboard("🛫 変更後の開始時刻", sh_init, sm_init, f"edit_s_{row['id']}")
-                    new_e_str = select_time_without_keyboard("🛬 変更後の終了時刻", eh_init, em_init, f"edit_e_{row['id']}")
+                    # 🚨 編集画面用カウンター
+                    if f"ed_s_min_{row['id']}" not in st.session_state: st.session_state[f"ed_s_min_{row['id']}"] = 540
+                    if f"ed_e_min_{row['id']}" not in st.session_state: st.session_state[f"ed_e_min_{row['id']}"] = 600
+                    
+                    col_t1, col_t2 = st.columns(2)
+                    with col_t1: new_s_str = time_counter_ui("🛫 変更後の開始時刻", f"ed_s_min_{row['id']}")
+                    with col_t2: new_e_str = time_counter_ui("🛬 変更後の終了時刻", f"ed_e_min_{row['id']}")
                     
                     edit_detail = st.text_input("メモ内容", value=row["内容"], key=f"ed_det_{row['id']}")
                     
@@ -463,9 +470,10 @@ elif mode == "⚙️ 固定":
         with r_col1: r_day = st.selectbox("曜日", WEEKDAYS)
         with r_col2: r_cat = st.selectbox("カテゴリ", st.session_state.categories)
         
-        # 🚨【固定追加画面もキーボード完全ブロック】
-        r_start_str = select_time_without_keyboard("🛫 開始", "09", "00", "rt_start")
-        r_end_str = select_time_without_keyboard("🛬 終了", "10", "00", "rt_end")
+        # 🚨 固定画面用カウンター
+        r_col3, r_col4 = st.columns(2)
+        with r_col3: r_start_str = time_counter_ui("🛫 開始", "rt_start_min")
+        with r_col4: r_end_str = time_counter_ui("🛬 終了", "rt_end_min")
             
         r_detail = st.text_input("メモ（任意）", key="r_detail")
         if st.button("➕ ルーティンを追加", use_container_width=True):
