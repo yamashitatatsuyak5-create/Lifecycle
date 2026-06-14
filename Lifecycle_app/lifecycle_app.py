@@ -1,12 +1,23 @@
 import streamlit as st
 import pandas as pd
-import os
-import json
 from datetime import datetime, timedelta, time
 import plotly.express as px
+from supabase import create_client, Client
+import hashlib
 
 # スマホ画面設定
 st.set_page_config(page_title="ライフログ", layout="wide", initial_sidebar_state="collapsed")
+
+# ==========================================
+# 🔑 Supabase（データベース）接続設定
+# ==========================================
+# 🚨 以下の2行の "" の中に、取得したURLと鍵を貼り付けてください！🚨
+
+SUPABASE_URL = "ここにProject URLを貼り付ける"
+SUPABASE_KEY = "ここにProject API keysのanonを貼り付ける"
+
+# Supabaseに接続
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ==========================================
 # 💅 スマホに特化した見やすいデザイン（CSS）
@@ -14,18 +25,13 @@ st.set_page_config(page_title="ライフログ", layout="wide", initial_sidebar_
 st.markdown("""
 <style>
     .stApp { background-color: #F4F7F8; font-family: 'Helvetica Neue', sans-serif; }
-    
-    /* 💡 修正ポイント：強すぎた文字色指定を緩め、必要な場所（見出しや段落）だけに適用 */
     h1, h2, h3, h4, h5, h6, p, label { color: #1C1E21 !important; }
-    
     [data-testid="stHeader"] { visibility: hidden; }
     .block-container { padding-top: 1rem; padding-bottom: 5rem; }
-    
-    /* 💡 修正ポイント：カレンダーのポップアップを強制的に白背景・黒文字に固定！ */
-    [data-baseweb="calendar"] {
-        background-color: #FFFFFF !important;
-    }
-    
+    [data-baseweb="popover"] > div { background-color: #FFFFFF !important; }
+    [data-baseweb="popover"] * { color: #1C1E21 !important; }
+    [data-baseweb="calendar"] [aria-selected="true"],
+    [data-baseweb="calendar"] [aria-selected="true"] * { background-color: #FF69B4 !important; color: #FFFFFF !important; }
     div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
         background-color: #FFFFFF !important; border: 2px solid #EAECEF !important;
         border-radius: 12px !important; padding: 2px 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.02);
@@ -33,17 +39,13 @@ st.markdown("""
     div[data-baseweb="input"] > div:focus-within, div[data-baseweb="select"] > div:focus-within {
         border-color: #FFB6C1 !important; box-shadow: 0 0 8px rgba(255, 182, 193, 0.6) !important;
     }
-    
     div.stButton > button {
         border-radius: 20px !important; font-weight: bold !important; padding: 10px 0 !important; 
         border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.08); background-color: #FFFFFF !important; transition: all 0.2s ease;
-        color: #1C1E21 !important; /* 💡 通常ボタンの文字色を明示的に黒に */
+        color: #1C1E21 !important;
     }
     div.stButton > button:active { transform: translateY(2px); }
-    
-    /* ピンクの主役ボタンは白文字にする */
     div.stButton > button[kind="primary"] { background-color: #FF69B4 !important; color: #FFFFFF !important; }
-    
     .list-card {
         background-color: #FFFFFF; padding: 15px; border-radius: 15px; margin-bottom: 10px;
         box-shadow: 0 2px 8px rgba(0,0,0,0.04); border: 1px solid #EAECEF;
@@ -51,74 +53,97 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 保存ファイル ---
-DATA_FILE = "timeline_data.csv"
-ROUTINE_FILE = "timeline_routine.csv"
-TRACKING_FILE = "timeline_tracking.json"
-CATEGORIES_FILE = "timeline_categories.json"
-
 WEEKDAYS = ["月", "火", "水", "木", "金", "土", "日"]
-DEFAULT_CATEGORIES = ["睡眠 🛌", "大学（講義・研究） 📝", "自主学習 ✏️", "バイト 💼", "移動・通学 🚶", "趣味・娯楽 🎮", "食事・生活 🍳", "その他 💬"]
+PASTEL_PALETTE = ["#B3E5FC", "#C8E6C9", "#FFF59D", "#FFE0B2", "#E1BEE7", "#FFCDD2", "#F8BBD0", "#CFD8DC", "#D7CCC8", "#FFE082"]
 
-PASTEL_PALETTE = [
-    "#B3E5FC", "#C8E6C9", "#FFF59D", "#FFE0B2", "#E1BEE7", 
-    "#FFCDD2", "#F8BBD0", "#CFD8DC", "#D7CCC8", "#FFE082", 
-    "#80DEEA", "#A5D6A7", "#CE93D8", "#F48FB1", "#90CAF9"
-]
+# パスワードを暗号化する関数（セキュリティ対策）
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
-def load_categories():
-    if os.path.exists(CATEGORIES_FILE):
-        with open(CATEGORIES_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return DEFAULT_CATEGORIES.copy()
+# ==========================================
+# 🔐 ログイン・サインアップ画面
+# ==========================================
+if "current_user" not in st.session_state: st.session_state.current_user = None
 
-def save_categories(cats):
-    with open(CATEGORIES_FILE, "w", encoding="utf-8") as f:
-        json.dump(cats, f, ensure_ascii=False)
+if st.session_state.current_user is None:
+    st.markdown("<h2 style='text-align: center;'>🧸 ライフログ<br><small>ログイン</small></h2>", unsafe_allow_html=True)
+    tab_login, tab_signup = st.tabs(["ログイン", "新規登録"])
+    
+    with tab_login:
+        st.write("アカウントを持っている方はこちら👇")
+        login_name = st.text_input("ユーザー名", key="login_name")
+        login_pass = st.text_input("パスワード", type="password", key="login_pass")
+        if st.button("ログイン", type="primary", use_container_width=True):
+            res = supabase.table("users").select("*").eq("user_name", login_name).execute()
+            if len(res.data) > 0 and res.data[0]["password"] == hash_password(login_pass):
+                st.session_state.current_user = login_name
+                st.rerun()
+            else:
+                st.error("ユーザー名かパスワードが違います。")
+                
+    with tab_signup:
+        st.write("初めての方はこちら👇（友達もここから作れます！）")
+        signup_name = st.text_input("好きなユーザー名", key="signup_name")
+        signup_pass = st.text_input("好きなパスワード", type="password", key="signup_pass")
+        if st.button("アカウントを作成する", type="primary", use_container_width=True):
+            res = supabase.table("users").select("*").eq("user_name", signup_name).execute()
+            if len(res.data) > 0:
+                st.error("⚠️ その名前はすでに誰かに使われています。")
+            elif signup_name and signup_pass:
+                # ユーザーを登録
+                supabase.table("users").insert({"user_name": signup_name, "password": hash_password(signup_pass)}).execute()
+                # デフォルトのカテゴリを登録
+                default_cats = ["睡眠 🛌", "大学（講義・研究） 📝", "自主学習 ✏️", "バイト 💼", "移動・通学 🚶", "趣味・娯楽 🎮", "食事・生活 🍳", "その他 💬"]
+                cat_inserts = [{"user_name": signup_name, "category_name": c} for c in default_cats]
+                supabase.table("timeline_categories").insert(cat_inserts).execute()
+                st.success("🎉 アカウントが完成しました！左のタブからログインしてください。")
+            else:
+                st.warning("ユーザー名とパスワードを入力してください。")
+    st.stop() # ログインしていない場合はここで画面を止める
 
-def load_data(file_path, default_columns):
-    if os.path.exists(file_path):
-        df = pd.read_csv(file_path)
-        if "日付" in df.columns: df["日付"] = df["日付"].astype(str)
-        return df
-    return pd.DataFrame(columns=default_columns)
+# ==========================================
+# 🚀 ログイン成功後（メインアプリ）
+# ==========================================
+user_name = st.session_state.current_user
 
-def save_data(df, file_path):
-    df.to_csv(file_path, index=False, encoding="utf-8-sig")
+# --- データベースから読み込む関数 ---
+def load_db_data():
+    res_cats = supabase.table("timeline_categories").select("category_name").eq("user_name", user_name).execute()
+    st.session_state.categories = [row["category_name"] for row in res_cats.data] if res_cats.data else ["未設定"]
+    
+    res_log = supabase.table("timeline_data").select("*").eq("user_name", user_name).execute()
+    df_log = pd.DataFrame(res_log.data) if res_log.data else pd.DataFrame(columns=["id", "date", "start_time", "end_time", "category", "detail"])
+    st.session_state.ui_log = df_log.rename(columns={"date": "日付", "start_time": "開始時刻", "end_time": "終了時刻", "category": "カテゴリ", "detail": "内容"})
 
-if "categories" not in st.session_state: st.session_state.categories = load_categories()
-if "df_log" not in st.session_state: st.session_state.df_log = load_data(DATA_FILE, ["日付", "開始時刻", "終了時刻", "カテゴリ", "内容"])
-if "df_routine" not in st.session_state: st.session_state.df_routine = load_data(ROUTINE_FILE, ["曜日", "開始時刻", "終了時刻", "カテゴリ", "内容"])
-if "target_date" not in st.session_state: st.session_state.target_date = datetime.now().date()
-if "app_mode" not in st.session_state: st.session_state.app_mode = "⏱️ 計測"
+    res_routine = supabase.table("timeline_routine").select("*").eq("user_name", user_name).execute()
+    df_rt = pd.DataFrame(res_routine.data) if res_routine.data else pd.DataFrame(columns=["id", "weekday", "start_time", "end_time", "category", "detail"])
+    st.session_state.ui_routine = df_rt.rename(columns={"weekday": "曜日", "start_time": "開始時刻", "end_time": "終了時刻", "category": "カテゴリ", "detail": "内容"})
+    
+    st.session_state.need_reload = False
 
+# 最新のデータを読み込む
+if "need_reload" not in st.session_state or st.session_state.need_reload:
+    load_db_data()
+
+ui_log = st.session_state.ui_log
+ui_routine = st.session_state.ui_routine
 dynamic_colors = {cat: PASTEL_PALETTE[i % len(PASTEL_PALETTE)] for i, cat in enumerate(st.session_state.categories)}
 
-def get_tracking_state():
-    if os.path.exists(TRACKING_FILE):
-        with open(TRACKING_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data["category"], datetime.fromisoformat(data["start_time"])
-    return None, None
+# アプリ状態の初期化
+if "target_date" not in st.session_state: st.session_state.target_date = datetime.now().date()
+if "app_mode" not in st.session_state: st.session_state.app_mode = "⏱️ 計測"
+if "tracking_cat" not in st.session_state: st.session_state.tracking_cat = None
+if "tracking_start" not in st.session_state: st.session_state.tracking_start = None
 
-def set_tracking_state(category, start_time):
-    with open(TRACKING_FILE, "w", encoding="utf-8") as f: json.dump({"category": category, "start_time": start_time.isoformat()}, f)
-
-def clear_tracking_state():
-    if os.path.exists(TRACKING_FILE): os.remove(TRACKING_FILE)
-
-def check_overlap(date_str, start_str, end_str, df_log):
-    if df_log.empty: return False, None
+def check_overlap(date_str, start_str, end_str, df_check_log):
+    if df_check_log.empty: return False, None
     new_start = pd.to_datetime(f"{date_str} {start_str}")
     new_end = pd.to_datetime(f"{date_str} {end_str}")
     if new_end <= new_start: new_end += pd.Timedelta(days=1)
-        
-    df_check = df_log.copy()
+    df_check = df_check_log.copy()
     df_check["Start_dt"] = pd.to_datetime(df_check["日付"] + " " + df_check["開始時刻"])
     df_check["End_dt"] = pd.to_datetime(df_check["日付"] + " " + df_check["終了時刻"])
-    mask = df_check["End_dt"] < df_check["Start_dt"]
-    df_check.loc[mask, "End_dt"] += pd.Timedelta(days=1)
-    
+    df_check.loc[df_check["End_dt"] < df_check["Start_dt"], "End_dt"] += pd.Timedelta(days=1)
     overlap = df_check[(new_start < df_check["End_dt"]) & (new_end > df_check["Start_dt"])]
     if not overlap.empty: return True, overlap.iloc[0]["カテゴリ"]
     return False, None
@@ -130,9 +155,16 @@ def round_to_15(dt):
     return dt
 
 # ==========================================
-# 🗓️ 画面上部：メイン・カレンダー
+# 🗓️ 画面上部：カレンダー＆ログアウト
 # ==========================================
-st.markdown("<h2 style='text-align: center; font-size: 1.5rem; margin-bottom: 0;'>🧸 ライフログ</h2>", unsafe_allow_html=True)
+col_user, col_out = st.columns([3, 1])
+with col_user: st.markdown(f"**👤 {user_name}** さん")
+with col_out:
+    if st.button("🚪 ログアウト", use_container_width=True):
+        st.session_state.current_user = None
+        st.rerun()
+
+st.markdown("<h2 style='text-align: center; font-size: 1.5rem; margin-top: -10px; margin-bottom: 0;'>🧸 ライフログ</h2>", unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns([1, 2, 1])
 with c1:
@@ -147,13 +179,11 @@ date_str = st.session_state.target_date.strftime("%Y-%m-%d")
 current_weekday = WEEKDAYS[st.session_state.target_date.weekday()]
 st.markdown(f"<div style='text-align: center; font-size: 0.95rem; font-weight: bold; margin-bottom: 10px;'>{date_str} ({current_weekday})</div>", unsafe_allow_html=True)
 
-current_cat, current_start = get_tracking_state()
-
 # ==========================================
 # 📊 タイムライン・グラフエリア
 # ==========================================
-if not st.session_state.df_log.empty:
-    df = st.session_state.df_log.copy()
+if not ui_log.empty:
+    df = ui_log.copy()
     df["Start_dt"] = pd.to_datetime(df["日付"] + " " + df["開始時刻"])
     df["End_dt"] = pd.to_datetime(df["日付"] + " " + df["終了時刻"])
     df.loc[df["End_dt"] < df["Start_dt"], "End_dt"] += pd.Timedelta(days=1)
@@ -213,23 +243,24 @@ st.markdown("<br>", unsafe_allow_html=True)
 mode = st.session_state.app_mode
 
 # ----------------------------
-# 各種モードの処理
+# 各種モードの処理（データベース連携版）
 # ----------------------------
 if mode == "⏱️ 計測":
-    if current_start is None:
+    if st.session_state.tracking_start is None:
         if not st.session_state.categories: st.warning("カテゴリがありません。「🏷️ カテゴリ」から追加してください。")
         else:
             rt_cat = st.selectbox("カテゴリを選ぶ", st.session_state.categories, key="rt_cat")
             if st.button("▶️ 今からスタート！", type="primary", use_container_width=True):
-                set_tracking_state(rt_cat, datetime.now())
+                st.session_state.tracking_cat = rt_cat
+                st.session_state.tracking_start = datetime.now()
                 st.rerun()
     else:
-        st.success(f"⏳ 現在 **{current_cat}** を計測中です！\n\n実際の開始: {current_start.strftime('%H:%M')}")
+        st.success(f"⏳ 現在 **{st.session_state.tracking_cat}** を計測中です！\n\n実際の開始: {st.session_state.tracking_start.strftime('%H:%M')}")
         rt_detail = st.text_input("メモ（任意）", key="rt_detail")
         
         if st.button("⏹️ 今終わった！（15分単位で記録）", type="primary", use_container_width=True):
             end_dt = datetime.now()
-            start_rounded = round_to_15(current_start)
+            start_rounded = round_to_15(st.session_state.tracking_start)
             end_rounded = round_to_15(end_dt)
             if start_rounded == end_rounded: end_rounded += timedelta(minutes=15)
                 
@@ -237,20 +268,19 @@ if mode == "⏱️ 計測":
             end_str = end_rounded.strftime('%H:%M')
             record_date_str = start_rounded.strftime('%Y-%m-%d') 
             
-            is_overlap, overlap_cat = check_overlap(record_date_str, start_str, end_str, st.session_state.df_log)
+            is_overlap, overlap_cat = check_overlap(record_date_str, start_str, end_str, ui_log)
             if is_overlap:
                 st.error(f"⚠️ 丸められた時間が「{overlap_cat}」と重なっています。手動で追加してください。")
-                clear_tracking_state()
+                st.session_state.tracking_cat = None; st.session_state.tracking_start = None
             else:
-                new_row = pd.DataFrame([{"日付": record_date_str, "開始時刻": start_str, "終了時刻": end_str, "カテゴリ": current_cat, "内容": rt_detail if rt_detail else "（未入力）"}])
-                st.session_state.df_log = pd.concat([st.session_state.df_log, new_row], ignore_index=True)
-                save_data(st.session_state.df_log, DATA_FILE)
-                clear_tracking_state()
+                supabase.table("timeline_data").insert({"user_name": user_name, "date": record_date_str, "start_time": start_str, "end_time": end_str, "category": st.session_state.tracking_cat, "detail": rt_detail if rt_detail else "（未入力）"}).execute()
+                st.session_state.tracking_cat = None; st.session_state.tracking_start = None
+                st.session_state.need_reload = True
                 st.success(f"{start_str} 〜 {end_str} で記録しました！")
                 st.rerun()
                 
         if st.button("❌ 計測をキャンセル", use_container_width=True):
-            clear_tracking_state(); st.rerun()
+            st.session_state.tracking_cat = None; st.session_state.tracking_start = None; st.rerun()
 
 elif mode == "📝 追加":
     if not st.session_state.categories: st.warning("カテゴリがありません。「🏷️ カテゴリ」から追加してください。")
@@ -266,37 +296,34 @@ elif mode == "📝 追加":
             end_str = end_time.strftime("%H:%M")
             if start_str == end_str: st.warning("開始と終了が同じです。")
             else:
-                is_overlap, overlap_cat = check_overlap(date_str, start_str, end_str, st.session_state.df_log)
+                is_overlap, overlap_cat = check_overlap(date_str, start_str, end_str, ui_log)
                 if is_overlap: st.error(f"⚠️ すでに「{overlap_cat}」が入っています！")
                 else:
-                    new_row = pd.DataFrame([{"日付": date_str, "開始時刻": start_str, "終了時刻": end_str, "カテゴリ": category, "内容": detail if detail else "（未入力）"}])
-                    st.session_state.df_log = pd.concat([st.session_state.df_log, new_row], ignore_index=True)
-                    save_data(st.session_state.df_log, DATA_FILE)
+                    supabase.table("timeline_data").insert({"user_name": user_name, "date": date_str, "start_time": start_str, "end_time": end_str, "category": category, "detail": detail if detail else "（未入力）"}).execute()
+                    st.session_state.need_reload = True
                     st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button(f"✨ {current_weekday}曜日のルーティンを一括追加", use_container_width=True):
-        routine_for_day = st.session_state.df_routine[st.session_state.df_routine["曜日"] == current_weekday]
+        routine_for_day = ui_routine[ui_routine["曜日"] == current_weekday]
         if routine_for_day.empty: st.warning("ルーティンが設定されていません。")
         else:
             success_count = 0
-            new_rows = []
             for _, row in routine_for_day.iterrows():
-                is_overlap, _ = check_overlap(date_str, row["開始時刻"], row["終了時刻"], st.session_state.df_log)
+                is_overlap, _ = check_overlap(date_str, row["開始時刻"], row["終了時刻"], ui_log)
                 if not is_overlap:
-                    new_rows.append({"日付": date_str, "開始時刻": row["開始時刻"], "終了時刻": row["終了時刻"], "カテゴリ": row["カテゴリ"], "内容": row["内容"]})
+                    supabase.table("timeline_data").insert({"user_name": user_name, "date": date_str, "start_time": row["開始時刻"], "end_time": row["終了時刻"], "category": row["カテゴリ"], "detail": row["内容"]}).execute()
                     success_count += 1
-            if new_rows:
-                st.session_state.df_log = pd.concat([st.session_state.df_log, pd.DataFrame(new_rows)], ignore_index=True)
-                save_data(st.session_state.df_log, DATA_FILE)
-                st.rerun()
+            st.session_state.need_reload = True
+            st.success(f"🎉 {success_count}件追加しました！")
+            st.rerun()
 
 elif mode == "📊 分析":
     st.markdown("#### 時間の使い方のバランス")
     period = st.selectbox("分析する期間", ["過去7日間", "過去30日間", "全期間", "今日"])
     
-    if not st.session_state.df_log.empty:
-        df_analysis = st.session_state.df_log.copy()
+    if not ui_log.empty:
+        df_analysis = ui_log.copy()
         df_analysis["Date_obj"] = pd.to_datetime(df_analysis["日付"]).dt.date
         today = datetime.now().date()
         
@@ -306,6 +333,12 @@ elif mode == "📊 分析":
         else: df_filtered = df_analysis
             
         if not df_filtered.empty:
+            # 「時間（h）」の計算（深夜またぎも考慮）
+            df_filtered["Start_dt"] = pd.to_datetime(df_filtered["日付"] + " " + df_filtered["開始時刻"])
+            df_filtered["End_dt"] = pd.to_datetime(df_filtered["日付"] + " " + df_filtered["終了時刻"])
+            df_filtered.loc[df_filtered["End_dt"] < df_filtered["Start_dt"], "End_dt"] += pd.Timedelta(days=1)
+            df_filtered["時間（h）"] = (df_filtered["End_dt"] - df_filtered["Start_dt"]).dt.total_seconds() / 3600.0
+
             sum_df = df_filtered.groupby("カテゴリ")["時間（h）"].sum().reset_index()
             total_hours = round(sum_df["時間（h）"].sum(), 1)
             
@@ -332,43 +365,42 @@ elif mode == "⚙️ 固定":
         r_detail = st.text_input("メモ（任意）", key="r_detail")
         
         if st.button("➕ ルーティンを追加", use_container_width=True):
-            new_routine = pd.DataFrame([{"曜日": r_day, "開始時刻": r_start.strftime("%H:%M"), "終了時刻": r_end.strftime("%H:%M"), "カテゴリ": r_cat, "内容": r_detail if r_detail else "（未入力）"}])
-            st.session_state.df_routine = pd.concat([st.session_state.df_routine, new_routine], ignore_index=True)
-            save_data(st.session_state.df_routine, ROUTINE_FILE)
+            supabase.table("timeline_routine").insert({"user_name": user_name, "weekday": r_day, "start_time": r_start.strftime("%H:%M"), "end_time": r_end.strftime("%H:%M"), "category": r_cat, "detail": r_detail if r_detail else "（未入力）"}).execute()
+            st.session_state.need_reload = True
             st.success("追加しました！"); st.rerun()
 
     st.markdown("#### 登録済み一覧")
-    if st.session_state.df_routine.empty: st.write("登録されていません。")
+    if ui_routine.empty: st.write("登録されていません。")
     else:
-        for idx, row in st.session_state.df_routine.iterrows():
+        for _, row in ui_routine.iterrows():
             st.markdown(f"<div class='list-card'>", unsafe_allow_html=True)
             c1, c2 = st.columns([4, 1])
             with c1:
                 st.markdown(f"**{row['曜日']}** | {row['開始時刻']}〜{row['終了時刻']}")
                 st.markdown(f"**{row['カテゴリ']}** {row['内容']}")
             with c2:
-                if st.button("🗑️", key=f"del_r_{idx}", use_container_width=True):
-                    st.session_state.df_routine = st.session_state.df_routine.drop(idx).reset_index(drop=True)
-                    save_data(st.session_state.df_routine, ROUTINE_FILE)
+                if st.button("🗑️", key=f"del_r_{row['id']}", use_container_width=True):
+                    supabase.table("timeline_routine").delete().eq("id", row['id']).execute()
+                    st.session_state.need_reload = True
                     st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
 elif mode == "📜 削除":
     st.markdown(f"#### {date_str} の記録")
-    if not st.session_state.df_log.empty:
-        df_edit_target = st.session_state.df_log[st.session_state.df_log["日付"] == date_str]
+    if not ui_log.empty:
+        df_edit_target = ui_log[ui_log["日付"] == date_str]
         if df_edit_target.empty: st.write("今日の記録はありません。")
         else:
-            for idx, row in df_edit_target.iterrows():
+            for _, row in df_edit_target.iterrows():
                 st.markdown(f"<div class='list-card'>", unsafe_allow_html=True)
                 c1, c2 = st.columns([4, 1])
                 with c1:
                     st.markdown(f"**{row['開始時刻']} 〜 {row['終了時刻']}**")
                     st.markdown(f"**{row['カテゴリ']}** <small>{row['内容']}</small>", unsafe_allow_html=True)
                 with c2:
-                    if st.button("🗑️", key=f"del_l_{idx}", use_container_width=True):
-                        st.session_state.df_log = st.session_state.df_log.drop(idx).reset_index(drop=True)
-                        save_data(st.session_state.df_log, DATA_FILE)
+                    if st.button("🗑️", key=f"del_l_{row['id']}", use_container_width=True):
+                        supabase.table("timeline_data").delete().eq("id", row['id']).execute()
+                        st.session_state.need_reload = True
                         st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
     else: st.write("データがありません。")
@@ -386,8 +418,10 @@ elif mode == "🏷️ カテゴリ":
         new_cats = list(dict.fromkeys(new_cats)) 
         
         if len(new_cats) > 0:
-            st.session_state.categories = new_cats
-            save_categories(new_cats)
+            supabase.table("timeline_categories").delete().eq("user_name", user_name).execute()
+            inserts = [{"user_name": user_name, "category_name": c} for c in new_cats]
+            supabase.table("timeline_categories").insert(inserts).execute()
+            st.session_state.need_reload = True
             st.success("カテゴリを保存しました！")
             st.rerun()
         else:
