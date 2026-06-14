@@ -119,8 +119,12 @@ ui_log = st.session_state.ui_log
 ui_routine = st.session_state.ui_routine
 dynamic_colors = {cat: PASTEL_PALETTE[i % len(PASTEL_PALETTE)] for i, cat in enumerate(st.session_state.categories)}
 
+# 🚨【修正】サーバー時間（UTC）によるリアルタイム計測のズレを防ぐため、日本時間（JST）を取得する関数
+def get_now_jst():
+    return datetime.utcnow() + timedelta(hours=9)
+
 # アプリ状態の初期化
-if "target_date" not in st.session_state: st.session_state.target_date = datetime.now().date()
+if "target_date" not in st.session_state: st.session_state.target_date = get_now_jst().date()
 if "app_mode" not in st.session_state: st.session_state.app_mode = "⏱️ 計測"
 if "tracking_cat" not in st.session_state: st.session_state.tracking_cat = None
 if "tracking_start" not in st.session_state: st.session_state.tracking_start = None
@@ -170,7 +174,7 @@ current_weekday = WEEKDAYS[st.session_state.target_date.weekday()]
 st.markdown(f"<div style='text-align: center; font-size: 0.95rem; font-weight: bold; margin-bottom: 10px;'>{date_str} ({current_weekday})</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 📊 タイムライン・グラフエリア（棒グラフ拡大版）
+# 📊 タイムライン・グラフエリア（棒グラフ拡大版＆文字ハラはみ出し対策）
 # ==========================================
 if not ui_log.empty:
     df = ui_log.copy()
@@ -187,36 +191,36 @@ if not ui_log.empty:
         # 開始時刻順に並び替え
         df_day = df_day.sort_values("開始時刻")
         
-        # 45分未満の予定は、棒グラフ内の文字をはじめから「空っぽ」にする
+        # 🚨【安全対策】45分未満の短い予定は、エラーとなる制限プロパティを使わず、あらかじめ中の文字を空にする
         df_day["グラフ内文字"] = df_day.apply(
             lambda r: r["カテゴリ"] if ((pd.to_datetime(r["日付"] + " " + r["終了時刻"]) - pd.to_datetime(r["日付"] + " " + r["開始時刻"])).total_seconds() / 60.0) >= 45 else "",
             axis=1
         )
         
-        # 🚨 修正：heightを 150 から 180 に大きくしました
+        # 🚨【改善】太く大きく表示するため height=180 に拡大
         fig = px.timeline(
             df_day, x_start="Start_dt", x_end="End_dt", y="日付", color="カテゴリ", 
             text="グラフ内文字", hover_name="内容", height=180, color_discrete_map=dynamic_colors
         )
         
+        # Plotlyに安全なプロパティのみを適用してテキスト設定
         fig.update_traces(
             textposition='inside', 
             insidetextanchor='middle', 
-            textfont_size=15,         # 🚨 文字サイズも少し大きく（14→15）して見やすくしました
+            textfont_size=15,         # 文字サイズを15pxに拡大
             textfont_color="#1C1E21",  
             marker_line_width=0
         )
         
-        # 短すぎる項目だけを判定して、引き出し線を伸ばす
+        # 45分未満の短い項目だけを自動で判定して、下側に引き出し線を伸ばす
         annotations = []
         for i, (_, row) in enumerate(df_day.iterrows()):
             duration_minutes = (row["End_dt"] - row["Start_dt"]).total_seconds() / 60.0
             
-            # 45分未満の短い予定は引き出し線を出す
             if duration_minutes < 45:
                 mid_dt = row["Start_dt"] + (row["End_dt"] - row["Start_dt"]) / 2
                 
-                # 🚨 グラフが太くなったので、引き出し線の出発点を調整（少し深めに伸ばす）
+                # グラフが太くなったことに合わせて、引き出し線の長さを微調整（35/65 → 45/75）
                 ay_val = 45 if (i % 2 == 0) else 75
                 display_text = f"<b>{row['カテゴリ']}</b> <span style='font-size:11px; color:#666;'>{row['開始時刻']}~</span>"
                 
@@ -242,10 +246,10 @@ if not ui_log.empty:
         fig.update_layout(
             xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True, tickfont=dict(color="#555", size=13, weight="bold")),
             yaxis=dict(title="", showticklabels=False, fixedrange=True),
-            bargap=0, # 🚨 修正：棒の上下の無駄な隙間をゼロにして、限界まで太くします！
+            bargap=0, # 🚨【改善】棒グラフの上下の余白をゼロにして限界まで太くする設定
             showlegend=False, 
             dragmode=False, 
-            margin=dict(l=10, r=10, t=10, b=85), # 下側の引き出し線用の余白
+            margin=dict(l=10, r=10, t=10, b=85), # 引き出し線の余白確保
             plot_bgcolor='rgba(0,0,0,0)', 
             paper_bgcolor='rgba(0,0,0,0)',
             annotations=annotations 
@@ -297,14 +301,14 @@ if mode == "⏱️ 計測":
             rt_cat = st.selectbox("カテゴリを選ぶ", st.session_state.categories, key="rt_cat")
             if st.button("▶️ 今からスタート！", type="primary", use_container_width=True):
                 st.session_state.tracking_cat = rt_cat
-                st.session_state.tracking_start = datetime.now()
+                st.session_state.tracking_start = get_now_jst() # 🚨【修正】スタート時間を正しい日本時間に
                 st.rerun()
     else:
         st.success(f"⏳ 現在 **{st.session_state.tracking_cat}** を計測中です！\n\n実際の開始: {st.session_state.tracking_start.strftime('%H:%M')}")
         rt_detail = st.text_input("メモ（任意）", key="rt_detail")
         
         if st.button("⏹️ 今終わった！（15分単位で記録）", type="primary", use_container_width=True):
-            end_dt = datetime.now()
+            end_dt = get_now_jst() # 🚨【修正】終了時間を正しい日本時間に
             start_rounded = round_to_15(st.session_state.tracking_start)
             end_rounded = round_to_15(end_dt)
             if start_rounded == end_rounded: end_rounded += timedelta(minutes=15)
@@ -370,7 +374,7 @@ elif mode == "📊 分析":
     if not ui_log.empty:
         df_analysis = ui_log.copy()
         df_analysis["Date_obj"] = pd.to_datetime(df_analysis["日付"]).dt.date
-        today = datetime.now().date()
+        today = get_now_jst().date() # 🚨【修正】分析の基準日も日本時間（JST）にする
         
         if period == "今日": df_filtered = df_analysis[df_analysis["Date_obj"] == today]
         elif period == "過去7日間": df_filtered = df_analysis[df_analysis["Date_obj"] >= (today - timedelta(days=6))]
@@ -387,10 +391,10 @@ elif mode == "📊 分析":
             sum_df = df_filtered.groupby("カテゴリ")["時間（h）"].sum().reset_index()
             total_hours = round(sum_df["時間（h）"].sum(), 1)
             
-            # 割合の小さな項目でも潰れないように円グラフの設定を大幅に強化しました！
+            # 円グラフの設定
             fig_pie = px.pie(sum_df, values='時間（h）', names='カテゴリ', color='カテゴリ', color_discrete_map=dynamic_colors, hole=0.4)
             
-            # 文字の位置を「外側（outside）」に強制し、勝手に文字が小さくなるのをストップ
+            # 文字の位置を「外側（outside）」に強制
             fig_pie.update_traces(
                 textinfo='percent+label', 
                 textposition='outside', 
@@ -400,7 +404,6 @@ elif mode == "📊 分析":
             # 真ん中の合計時間表示
             fig_pie.add_annotation(text=f"<b>計 {total_hours}h</b>", x=0.5, y=0.5, font_size=18, showarrow=False)
             
-            # 外側の文字が画面からはみ出さないように、余白（margin）とグラフ全体の高さ（height）をゆったり広げ、全体の文字サイズを14pxに固定しました
             fig_pie.update_layout(
                 showlegend=False, 
                 margin=dict(t=40, b=40, l=40, r=40), 
@@ -412,21 +415,20 @@ elif mode == "📊 分析":
             
             st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
             
-            # 🚨【新設】円グラフの下に表示する詳細データ表の作成
+            # 🚨【新設】円グラフの真下に表示する詳細データ表（ランキング形式）
             st.markdown(f"<p style='font-size:1.0rem; font-weight:bold; color:#555; margin-bottom:5px;'>📋 「{period}」のカテゴリ別詳細</p>", unsafe_allow_html=True)
             
             # 合計時間が長い順（降順）に並び替える
             df_table = sum_df.sort_values(by="時間（h）", ascending=False).copy()
             
-            # パーセント（％）を計算して文字にする
+            # パーセント（％）と合計時間をテキスト化
             df_table["割合"] = (df_table["時間（h）"] / total_hours * 100).round(1).astype(str) + " %"
-            # 時間の表示を綺麗にする（例: 42.5 時間）
             df_table["合計時間"] = df_table["時間（h）"].round(1).astype(str) + " 時間"
             
-            # 列の整理
+            # 不要な列を削って並び替え
             df_table = df_table[["カテゴリ", "合計時間", "割合"]]
             
-            # 綺麗なテーブル形式でStreamlitに表示（インデックスは非表示）
+            # Streamlitの綺麗なテーブル形式で表示（インデックスは非表示）
             st.dataframe(df_table, use_container_width=True, hide_index=True)
             st.markdown("<br>", unsafe_allow_html=True)
             
