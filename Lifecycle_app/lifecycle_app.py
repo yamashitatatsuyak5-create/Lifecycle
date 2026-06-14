@@ -39,39 +39,73 @@ div[data-testid^="stTimeInput"] input{
     pointer-events:none!important;      /* タップ出来ない = フォーカス出来ない */
     caret-color:transparent!important;  /* キャレットも非表示 */
 }
+div[data-testid^="stSelect"] input,
+div[data-testid^="stDateInput"] input,
+div[data-testid^="stTimeInput"] input {
+    pointer-events: none !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    outline: none !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+}
+
+/* iOS Safari 特有対策：タップハイライトを消す */
+div[data-testid^="stSelect"],
+div[data-testid^="stDateInput"],
+div[data-testid^="stTimeInput"] {
+    -webkit-tap-highlight-color: transparent !important;
+}
 </style>
 
 <script>
-/* すべての Streamlit セレクト系コンポーネントを
-   “タップでドロップダウンのみ開いてキーボードは出さない”
-   ように改造するスクリプト                                    */
 (function(){
 
-  function hackAll(){
+  // "常時フォーカスを剥がす"パトロール
+  function killFocusOnSelectInputs(){
+    setInterval(()=>{
+      const active = document.activeElement;
+      if(!active) return;
+
+      // 対象は selectbox / date / time の input
+      const isTarget = 
+        active.closest('div[data-testid^="stSelect"]')    ||
+        active.closest('div[data-testid^="stDateInput"]') ||
+        active.closest('div[data-testid^="stTimeInput"]');
+
+      if(isTarget && active.tagName==='INPUT'){
+        // フォーカスが当たった input を即座に blur
+        active.blur();
+        
+        // ドロップダウンを開く
+        const box = isTarget;
+        box.click();
+      }
+    }, 50);  // 50ms ごとにチェック
+  }
+
+  // タップ時に即座に反応
+  function interceptTaps(){
     const q = `
       div[data-testid^="stSelect"],
       div[data-testid^="stDateInput"],
       div[data-testid^="stTimeInput"]`;
-    document.querySelectorAll(q).forEach(box=>{
-      if(box.dataset.hacked) return;          // 既に処理済み
-
-      // ▼▼ input は既に pointer-events:none にしてあるので
-      //    ここでは親(box)にクリックを当てるだけで OK
-      box.addEventListener('touchstart',e=>{
-        // touchstart の段階で “自分自身” へ focus/blur させて
-        // ネイティブドロップダウンを表示
-        box.click();
-      },{passive:true});
-      box.addEventListener('mousedown',e=>box.click(),{passive:true});
-
-      box.dataset.hacked = 'true';
-    });
+    
+    document.addEventListener('touchstart',(e)=>{
+      const target = e.target.closest(q);
+      if(target){
+        e.preventDefault();
+        // 子の input をすべて blur
+        target.querySelectorAll('input').forEach(inp=>inp.blur());
+        // ドロップダウン開く
+        target.click();
+      }
+    }, {capture:true, passive:false});
   }
 
-  // 初回 & DOM 変化時に実行
-  hackAll();
-  new MutationObserver(hackAll)
-    .observe(document,{childList:true,subtree:true});
+  killFocusOnSelectInputs();
+  interceptTaps();
+
 })();
 </script>
 """, unsafe_allow_html=True)
