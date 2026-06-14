@@ -170,7 +170,7 @@ current_weekday = WEEKDAYS[st.session_state.target_date.weekday()]
 st.markdown(f"<div style='text-align: center; font-size: 0.95rem; font-weight: bold; margin-bottom: 10px;'>{date_str} ({current_weekday})</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 📊 タイムライン・グラフエリア（入り切らない時だけ引き出し線・エラー修正版）
+# 📊 タイムライン・グラフエリア（エラー完全解消版）
 # ==========================================
 if not ui_log.empty:
     df = ui_log.copy()
@@ -187,33 +187,38 @@ if not ui_log.empty:
         # 開始時刻順に並び替え
         df_day = df_day.sort_values("開始時刻")
         
-        # 横棒グラフの作成
-        fig = px.timeline(
-            df_day, x_start="Start_dt", x_end="End_dt", y="日付", color="カテゴリ", 
-            text="カテゴリ", hover_name="内容", height=150, color_discrete_map=dynamic_colors
+        # 🚨【新方式】45分未満の予定は、棒グラフ内の文字をはじめから「空っぽ」にする
+        # これにより、エラーの原因だった constraintext を使わずに文字の非表示を実現します
+        df_day["グラフ内文字"] = df_day.apply(
+            lambda r: r["カテゴリ"] if ((pd.to_datetime(r["日付"] + " " + r["終了時刻"]) - pd.to_datetime(r["日付"] + " " + r["開始時刻"])).total_seconds() / 60.0) >= 45 else "",
+            axis=1
         )
         
-        # ✅ エラー修正箇所：textfont の書き方を Plotly のルールに正しく修正しました
+        # 横棒グラフの作成（表示文字には上記で作った「グラフ内文字」を指定）
+        fig = px.timeline(
+            df_day, x_start="Start_dt", x_end="End_dt", y="日付", color="カテゴリ", 
+            text="グラフ内文字", hover_name="内容", height=150, color_discrete_map=dynamic_colors
+        )
+        
+        # 安全な設定のみに絞ってアップデート
         fig.update_traces(
             textposition='inside', 
             insidetextanchor='middle', 
             textfont_size=14,         # 文字サイズ指定
             textfont_color="#1C1E21",  # 文字色指定
-            constraintext='hide',      # 入り切らない時は文字を潰さず、一旦隠す
             marker_line_width=0
         )
         
-        # 隠された（＝時間が短すぎる）項目だけを判定して、引き出し線を伸ばす
+        # 短すぎる項目だけを判定して、引き出し線を伸ばす（こちらは変更なし）
         annotations = []
         for i, (_, row) in enumerate(df_day.iterrows()):
-            # 1マスの時間（分）を計算
             duration_minutes = (row["End_dt"] - row["Start_dt"]).total_seconds() / 60.0
             
-            # 目安として「45分未満」の短い予定は文字が潰れるので、引き出し線を出す
+            # 45分未満の短い予定は引き出し線を出す
             if duration_minutes < 45:
                 mid_dt = row["Start_dt"] + (row["End_dt"] - row["Start_dt"]) / 2
                 
-                # 線が被らないように、交互に長さを変えて下に伸ばす
+                # 線が被らないように交互に高さを変えて下に伸ばす
                 ay_val = 35 if (i % 2 == 0) else 65
                 display_text = f"<b>{row['カテゴリ']}</b> <span style='font-size:11px; color:#666;'>{row['開始時刻']}~</span>"
                 
@@ -241,10 +246,10 @@ if not ui_log.empty:
             yaxis=dict(title="", showticklabels=False, fixedrange=True),
             showlegend=False, 
             dragmode=False, 
-            margin=dict(l=10, r=10, t=10, b=75), # 下側に引き出し線が出るので余白を確保
+            margin=dict(l=10, r=10, t=10, b=75), # 下側の余白をしっかり確保
             plot_bgcolor='rgba(0,0,0,0)', 
             paper_bgcolor='rgba(0,0,0,0)',
-            annotations=annotations # 判定した引き出し線だけを合体
+            annotations=annotations # 判定した引き出し線を合体
         )
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
