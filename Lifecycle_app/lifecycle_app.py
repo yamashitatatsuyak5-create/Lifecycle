@@ -154,7 +154,7 @@ with col_out:
         st.session_state.current_user = None
         st.rerun()
 
-st.markdown("<h2 style='text-align: center; font-size: 1.5rem; margin-top: -10px; margin-bottom: 0;'>🧸 ライフログ</h2>", unsafe_allow_html=True)
+st.markdown("<h2 style='text-align: center; font-size: 1.5rem; margin-top: -10px; margin-bottom: 0;'>時間管理表</h2>", unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns([1, 2, 1])
 with c1:
