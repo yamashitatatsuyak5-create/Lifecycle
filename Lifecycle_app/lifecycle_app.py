@@ -128,9 +128,9 @@ if "target_date" not in st.session_state: st.session_state.target_date = get_now
 if "app_mode" not in st.session_state: st.session_state.app_mode = "⏱️ 計測"
 if "tracking_cat" not in st.session_state: st.session_state.tracking_cat = None
 if "tracking_start" not in st.session_state: st.session_state.tracking_start = None
-if "editing_log_id" not in st.session_state: st.session_state.editing_log_id = None # 🚨【新設】編集中のログID管理用
+if "editing_log_id" not in st.session_state: st.session_state.editing_log_id = None 
 
-# 重複チェック（自分自身の古いデータ(exclude_id)は除外してチェックできるように拡張）
+# 重複チェック
 def check_overlap(date_str, start_str, end_str, df_check_log, exclude_id=None):
     if df_check_log.empty: return False, None
     df_check = df_check_log.copy()
@@ -154,6 +154,40 @@ def round_to_15(dt):
     dt -= discard
     if discard >= timedelta(minutes=7, seconds=30): dt += timedelta(minutes=15)
     return dt
+
+# 🚨【新設】同じカテゴリの連続する予定を1つに統合する関数
+def merge_continuous_logs(df_target):
+    if df_target.empty: return df_target
+    
+    # 開始日時と終了日時を作成してソート
+    df_m = df_target.copy()
+    df_m["Start_dt"] = pd.to_datetime(df_m["日付"] + " " + df_m["開始時刻"])
+    df_m["End_dt"] = pd.to_datetime(df_m["日付"] + " " + df_m["終了時刻"])
+    df_m.loc[df_m["End_dt"] < df_m["Start_dt"], "End_dt"] += pd.Timedelta(days=1)
+    df_m = df_m.sort_values("Start_dt").reset_index(drop=True)
+    
+    merged_rows = []
+    current_row = df_m.iloc[0].to_dict()
+    
+    for i in range(1, len(df_m)):
+        next_row = df_m.iloc[i].to_dict()
+        
+        # 1つ前の「終了日時」と次の「開始日時」がピッタリ同じ、かつ同じカテゴリの場合
+        if current_row["End_dt"] == next_row["Start_dt"] and current_row["カテゴリ"] == next_row["カテゴリ"]:
+            current_row["End_dt"] = next_row["End_dt"]
+            current_row["終了時刻"] = next_row["終了時刻"]
+            # メモ内容も結合する（同じならそのまま、違うならカンマ区切り）
+            if current_row["内容"] != next_row["内容"] and next_row["内容"] != "（未入力）":
+                if current_row["内容"] == "（未入力）":
+                    current_row["内容"] = next_row["内容"]
+                else:
+                    current_row["内容"] += f", {next_row['内容']}"
+        else:
+            merged_rows.append(current_row)
+            current_row = next_row
+            
+    merged_rows.append(current_row)
+    return pd.DataFrame(merged_rows)
 
 # ==========================================
 # 🗓️ 画面上部：カレンダー＆ログアウト
@@ -181,26 +215,24 @@ current_weekday = WEEKDAYS[st.session_state.target_date.weekday()]
 st.markdown(f"<div style='text-align: center; font-size: 0.95rem; font-weight: bold; margin-bottom: 10px;'>{date_str} ({current_weekday})</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 📊 タイムライン・グラフエリア（棒グラフ拡大版＆文字ハラはみ出し対策）
+# 📊 タイムライン・グラフエリア（自動マージ対応版）
 # ==========================================
 if not ui_log.empty:
-    df = ui_log.copy()
-    df["Start_dt"] = pd.to_datetime(df["日付"] + " " + df["開始時刻"])
-    df["End_dt"] = pd.to_datetime(df["日付"] + " " + df["終了時刻"])
-    df.loc[df["End_dt"] < df["Start_dt"], "End_dt"] += pd.Timedelta(days=1)
-    df["時間（h）"] = (df["End_dt"] - df["Start_dt"]).dt.total_seconds() / 3600.0
+    df_raw = ui_log.copy()
+    df_day_raw = df_raw[df_raw["日付"] == date_str].copy()
     
-    df_day = df[df["日付"] == date_str].copy()
     start_of_day = pd.to_datetime(f"{date_str} 00:00:00")
     end_of_day = start_of_day + pd.Timedelta(days=1)
     
-    if not df_day.empty:
-        # 開始時刻順に並び替え
-        df_day = df_day.sort_values("開始時刻")
+    if not df_day_raw.empty:
+        # 🚨【核心】ここで同じカテゴリが連続していたら合体させる！
+        df_day = merge_continuous_logs(df_day_raw)
+        
+        df_day["時間（h）"] = (df_day["End_dt"] - df_day["Start_dt"]).dt.total_seconds() / 3600.0
         
         # 45分未満の短い予定は、あらかじめ中の文字を空にする
         df_day["グラフ内文字"] = df_day.apply(
-            lambda r: r["カテゴリ"] if ((pd.to_datetime(r["日付"] + " " + r["終了時刻"]) - pd.to_datetime(r["日付"] + " " + r["開始時刻"])).total_seconds() / 60.0) >= 45 else "",
+            lambda r: r["カテゴリ"] if ((r["End_dt"] - r["Start_dt"]).total_seconds() / 60.0) >= 45 else "",
             axis=1
         )
         
@@ -218,7 +250,7 @@ if not ui_log.empty:
             marker_line_width=0
         )
         
-        # 45分未満の短い項目だけを自動で判定して、下側に引き出し線を伸ばす
+        # 引き出し線の処理
         annotations = []
         for i, (_, row) in enumerate(df_day.iterrows()):
             duration_minutes = (row["End_dt"] - row["Start_dt"]).total_seconds() / 60.0
@@ -276,7 +308,6 @@ m4, m5, m6 = st.columns(3)
 with m4:
     if st.button("⚙️ 固定", type="primary" if st.session_state.app_mode == "⚙️ 固定" else "secondary", use_container_width=True): change_mode("⚙️ 固定"); st.rerun()
 with m5:
-    # 🚨【ボタン名変更】「📜 削除」から「📜 編集・削除」に変更
     if st.button("📜 編集・削除", type="primary" if st.session_state.app_mode == "📜 編集・削除" else "secondary", use_container_width=True): change_mode("📜 編集・削除"); st.rerun()
 with m6:
     if st.button("🏷️ カテゴリ", type="primary" if st.session_state.app_mode == "🏷️ カテゴリ" else "secondary", use_container_width=True): change_mode("🏷️ カテゴリ"); st.rerun()
@@ -369,15 +400,18 @@ elif mode == "📊 分析":
         df_analysis["Date_obj"] = pd.to_datetime(df_analysis["日付"]).dt.date
         today = get_now_jst().date() 
         
-        if period == "今日": df_filtered = df_analysis[df_analysis["Date_obj"] == today]
-        elif period == "過去7日間": df_filtered = df_analysis[df_analysis["Date_obj"] >= (today - timedelta(days=6))]
-        elif period == "過去30日間": df_filtered = df_analysis[df_analysis["Date_obj"] >= (today - timedelta(days=29))]
-        else: df_filtered = df_analysis
+        if period == "今日": df_filtered_raw = df_analysis[df_analysis["Date_obj"] == today]
+        elif period == "過去7日間": df_filtered_raw = df_analysis[df_analysis["Date_obj"] >= (today - timedelta(days=6))]
+        elif period == "過去30日間": df_filtered_raw = df_analysis[df_analysis["Date_obj"] >= (today - timedelta(days=29))]
+        else: df_filtered_raw = df_analysis
             
-        if not df_filtered.empty:
-            df_filtered["Start_dt"] = pd.to_datetime(df_filtered["日付"] + " " + df_filtered["開始時刻"])
-            df_filtered["End_dt"] = pd.to_datetime(df_filtered["日付"] + " " + df_filtered["終了時刻"])
-            df_filtered.loc[df_filtered["End_dt"] < df_filtered["Start_dt"], "End_dt"] += pd.Timedelta(days=1)
+        if not df_filtered_raw.empty:
+            # 🚨【分析用マージ】分析画面でも、日付ごとに連続するデータをマージしてから集計する
+            df_list = []
+            for d_str, sub_df in df_filtered_raw.groupby("日付"):
+                df_list.append(merge_continuous_logs(sub_df))
+            df_filtered = pd.concat(df_list)
+            
             df_filtered["時間（h）"] = (df_filtered["End_dt"] - df_filtered["Start_dt"]).dt.total_seconds() / 3600.0
 
             sum_df = df_filtered.groupby("カテゴリ")["時間（h）"].sum().reset_index()
@@ -402,7 +436,6 @@ elif mode == "📊 分析":
         else: st.warning("この期間の記録はありません。")
     else: st.write("データがありません。")
 
-# 🚨【大幅リニューアル】変更（編集）機能を追加
 elif mode == "📜 編集・削除":
     st.markdown(f"#### {date_str} の記録・編集")
     if not ui_log.empty:
@@ -410,17 +443,15 @@ elif mode == "📜 編集・削除":
         if df_edit_target.empty: 
             st.write("今日の記録はありません。")
         else:
-            # 開始時刻順に並べて表示
+            # 💡 編集・削除では元のバラバラのデータ（id単位）で表示させる（そうしないと個別に消せなくなるため）
             df_edit_target = df_edit_target.sort_values("開始時刻")
             
             for _, row in df_edit_target.iterrows():
-                # 今このカードが「編集モード」かどうかを判定
                 is_editing = (st.session_state.editing_log_id == row["id"])
                 
                 st.markdown(f"<div class='list-card'>", unsafe_allow_html=True)
                 
                 if not is_editing:
-                    # 通常表示モード
                     c1, c2, c3 = st.columns([3.5, 1, 1])
                     with c1:
                         st.markdown(f"**{row['開始時刻']} 〜 {row['終了時刻']}**")
@@ -435,10 +466,8 @@ elif mode == "📜 編集・削除":
                             st.session_state.need_reload = True
                             st.rerun()
                 else:
-                    # ✏️ インライン編集モード
                     st.markdown("<p style='font-size:0.85rem; color:#f03e3e; font-weight:bold;'>📝 データを編集中...</p>", unsafe_allow_html=True)
                     
-                    # 既存の時間を time オブジェクトに直して初期値にする
                     try:
                         sh, sm = map(int, row["開始時刻"].split(":"))
                         eh, em = map(int, row["終了時刻"].split(":"))
@@ -448,16 +477,14 @@ elif mode == "📜 編集・削除":
                         init_start = time(9, 0)
                         init_end = time(10, 0)
                     
-                    # フォーム用の入力欄
                     edit_cat = st.selectbox("カテゴリ", st.session_state.categories, index=st.session_state.categories.index(row["カテゴリ"]) if row["カテゴリ"] in st.session_state.categories else 0, key=f"ed_cat_{row['id']}")
                     
-                    col_t1, col_t2 = st.columns(2)
+                    col_t1, col_t2 = columns = st.columns(2)
                     with col_t1: edit_start = st.time_input("開始時刻", init_start, key=f"ed_start_{row['id']}")
                     with col_t2: edit_end = st.time_input("終了時刻", init_end, key=f"ed_end_{row['id']}")
                     
                     edit_detail = st.text_input("メモ内容", value=row["内容"], key=f"ed_det_{row['id']}")
                     
-                    # 保存とキャンセルのボタン
                     cb1, cb2 = st.columns(2)
                     with cb1:
                         if st.button("💾 変更を保存", type="primary", key=f"save_btn_{row['id']}", use_container_width=True):
@@ -467,12 +494,10 @@ elif mode == "📜 編集・削除":
                             if new_s_str == new_e_str:
                                 st.error("⚠️ 開始と終了が同じ時刻です。")
                             else:
-                                # 自分自身の時間枠を除外して重複チェック
                                 is_overlap, overlap_cat = check_overlap(date_str, new_s_str, new_e_str, ui_log, exclude_id=row["id"])
                                 if is_overlap:
                                     st.error(f"⚠️ 変更後の時間が「{overlap_cat}」と重なっています！")
                                 else:
-                                    # データベースを更新（UPDATE）
                                     supabase.table("timeline_data").update({
                                         "start_time": new_s_str,
                                         "end_time": new_e_str,
@@ -480,7 +505,7 @@ elif mode == "📜 編集・削除":
                                         "detail": edit_detail if edit_detail else "（未入力）"
                                     }).eq("id", row['id']).execute()
                                     
-                                    st.session_state.editing_log_id = None # 編集モード終了
+                                    st.session_state.editing_log_id = None 
                                     st.session_state.need_reload = True
                                     st.rerun()
                     with cb2:
