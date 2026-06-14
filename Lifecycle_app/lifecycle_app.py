@@ -16,7 +16,7 @@ SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ==========================================
-# 💅 スマホ最適化デザイン ＆ ピッカー強制CSS
+# 💅 スマホ最適化デザイン
 # ==========================================
 st.markdown("""
 <style>
@@ -34,32 +34,6 @@ st.markdown("""
         border-radius: 15px; 
         margin-bottom: 10px;
         border: 1px solid rgba(0, 0, 0, 0.1);
-    }
-
-    /* 🚨 スマホ標準のピッカー枠をきれいにスタイリング（キーボード完全無効化） */
-    .native-time-box {
-        width: 100%;
-        padding: 12px;
-        font-size: 1.2rem;
-        border-radius: 12px;
-        border: 1px solid rgba(0,0,0,0.15);
-        background-color: rgba(0,0,0,0.03);
-        text-align: center;
-        font-weight: bold;
-        color: #1C1E21;
-        box-sizing: border-box;
-        margin-bottom: 12px;
-        /* キーボードが出てこないように入力をブロック */
-        -webkit-user-select: none;
-        user-select: none;
-    }
-    
-    @media (prefers-color-scheme: dark) {
-        .native-time-box {
-            background-color: rgba(255,255,255,0.07);
-            color: #FFFFFF;
-            border: 1px solid rgba(255,255,255,0.2);
-        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -133,29 +107,21 @@ if "tracking_cat" not in st.session_state: st.session_state.tracking_cat = None
 if "tracking_start" not in st.session_state: st.session_state.tracking_start = None
 if "editing_log_id" not in st.session_state: st.session_state.editing_log_id = None 
 
-# 🚨 【新設】確実にドラムロールを開く、Streamlitを使わないネイティブピッカー関数
-def native_html_time_picker(label, default_val, key_suffix):
+# 🚨 【新設】キーボードが絶対出ず、100%確実に動く「時・分 分離セレクトボックスUI」
+def split_time_selectbox(label, default_h, default_m, key_suffix):
     st.markdown(f"<small style='color:#555;font-weight:bold;'>{label}</small>", unsafe_allow_html=True)
     
-    # 完全にキーボードをブロック（onkeydown="return false"）したHTMLピッカーを配置
-    # Streamlitのコンポーネントとして値を取得するため、個別のキーでst.text_input等の裏に隠すか、直接フォームとして利用可能にします。
-    # スマホブラウザに対して「これは時間入力（ドラムロール対象）」だと100%認識させます。
-    selected_time = st.components.v1.html(f"""
-    <input type="time" id="picker_{key_suffix}" value="{default_val}" class="native-time-box" 
-           onkeydown="return false;" onfocus="this.blur();"
-           style="width:100%; padding:12px; font-size:1.3rem; font-weight:bold; border-radius:10px; border:1px solid #ccc; text-align:center; background:#fafafa; -webkit-user-select:none; user-select:none;"
-           onchange="window.parent.postMessage({{type: 'streamlit:setComponentValue', value: this.value}}, '*');">
-    """, height=60)
+    hours_options = [f"{i:02d}" for i in range(24)]
+    minutes_options = ["00", "15", "30", "45"]
     
-    # 上記のHTMLコンポーネント単体だとStreamlitのリロードタイミングが特殊になる場合があるため、
-    # 最も安定してドラムロールを開かせつつデータも取れる「html5 time」形式を通常コンポーネントでラップする方法にします。
-    # Streamlit 1.29+ で最も不具合が起きないネイティブ埋め込み形式に調整
-    time_key = f"time_p_{key_suffix}"
-    if time_key not in st.session_state:
-        st.session_state[time_key] = datetime.strptime(default_val, "%H:%M").time()
+    # 横並びに「時」と「分」を配置
+    c_h, c_m = st.columns(2)
+    with c_h:
+        h_val = st.selectbox("時", hours_options, index=hours_options.index(f"{int(default_h):02d}"), key=f"sel_h_{key_suffix}", label_visibility="collapsed")
+    with c_m:
+        m_val = st.selectbox("分", minutes_options, index=minutes_options.index(f"{int(default_m):02d}") if f"{int(default_m):02d}" in minutes_options else 0, key=f"sel_m_{key_suffix}", label_visibility="collapsed")
         
-    t_res = st.time_input(label, st.session_state[time_key], key=f"act_{key_suffix}", label_visibility="collapsed")
-    return t_res.strftime("%H:%M")
+    return f"{h_val}:{m_val}"
 
 def check_overlap(date_str, start_str, end_str, df_check_log, exclude_id=None):
     if df_check_log.empty: return False, None
@@ -330,12 +296,9 @@ elif mode == "📝 追加":
     else:
         category = st.selectbox("カテゴリ", st.session_state.categories, key="man_cat")
         
-        # 🚨 【修正】確実にドラムロールを開かせつつ、キーボードを無効化する仕組みに変更
-        col3, col4 = st.columns(2)
-        with col3: 
-            start_str = native_html_time_picker("🛫 開始時刻", "09:00", "add_start")
-        with col4: 
-            end_str = native_html_time_picker("🛬 終了時刻", "10:00", "add_end")
+        # 🚨 【決定版】時と分を分けたセレクトボックス（100%バグらず動き、キーボードも出ない）
+        start_str = split_time_selectbox("🛫 開始時刻", 9, 0, "add_start")
+        end_str = split_time_selectbox("🛬 終了時刻", 10, 0, "add_end")
             
         detail = st.text_input("メモ", key="man_detail")
         
@@ -425,10 +388,15 @@ elif mode == "📜 編集・削除":
                     st.markdown("<p style='font-size:0.85rem; color:#f03e3e; font-weight:bold;'>📝 データを編集中...</p>", unsafe_allow_html=True)
                     edit_cat = st.selectbox("カテゴリ", st.session_state.categories, index=st.session_state.categories.index(row["カテゴリ"]) if row["カテゴリ"] in st.session_state.categories else 0, key=f"ed_cat_{row['id']}")
                     
-                    # 🚨 編集画面用のピッカー
-                    col_t1, col_t2 = st.columns(2)
-                    with col_t1: new_s_str = native_html_time_picker("🛫 変更後の開始時刻", row["開始時刻"], f"edit_s_{row['id']}")
-                    with col_t2: new_e_str = native_html_time_picker("🛬 変更後の終了時刻", row["終了時刻"], f"edit_e_{row['id']}")
+                    # 🚨 編集用の時・分セレクトボックス
+                    try:
+                        sh, sm = map(int, row["開始時刻"].split(":"))
+                        eh, em = map(int, row["終了時刻"].split(":"))
+                    except:
+                        sh, sm, eh, em = 9, 0, 10, 0
+                        
+                    new_s_str = split_time_selectbox("🛫 変更後の開始時刻", sh, sm, f"edit_s_{row['id']}")
+                    new_e_str = split_time_selectbox("🛬 変更後の終了時刻", eh, em, f"edit_e_{row['id']}")
                     
                     edit_detail = st.text_input("メモ内容", value=row["内容"], key=f"ed_det_{row['id']}")
                     
@@ -459,10 +427,9 @@ elif mode == "⚙️ 固定":
         with r_col1: r_day = st.selectbox("曜日", WEEKDAYS)
         with r_col2: r_cat = st.selectbox("カテゴリ", st.session_state.categories)
         
-        # 🚨 固定画面用のピッカー
-        r_col3, r_col4 = st.columns(2)
-        with r_col3: r_start_str = native_html_time_picker("🛫 開始", "09:00", "rt_start")
-        with r_col4: r_end_str = native_html_time_picker("🛬 終了", "10:00", "rt_end")
+        # 🚨 ルーティン用の時・分セレクトボックス
+        r_start_str = split_time_selectbox("🛫 開始", 9, 0, "rt_start")
+        r_end_str = split_time_selectbox("🛬 終了", 10, 0, "rt_end")
             
         r_detail = st.text_input("メモ（任意）", key="r_detail")
         if st.button("➕ ルーティンを追加", use_container_width=True):
