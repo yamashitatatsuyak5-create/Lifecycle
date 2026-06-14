@@ -119,7 +119,7 @@ ui_log = st.session_state.ui_log
 ui_routine = st.session_state.ui_routine
 dynamic_colors = {cat: PASTEL_PALETTE[i % len(PASTEL_PALETTE)] for i, cat in enumerate(st.session_state.categories)}
 
-# 🚨【修正】サーバー時間（UTC）によるリアルタイム計測のズレを防ぐため、日本時間（JST）を取得する関数
+# サーバー時間（UTC）によるリアルタイム計測のズレを防ぐため、日本時間（JST）を取得する関数
 def get_now_jst():
     return datetime.utcnow() + timedelta(hours=9)
 
@@ -128,13 +128,20 @@ if "target_date" not in st.session_state: st.session_state.target_date = get_now
 if "app_mode" not in st.session_state: st.session_state.app_mode = "⏱️ 計測"
 if "tracking_cat" not in st.session_state: st.session_state.tracking_cat = None
 if "tracking_start" not in st.session_state: st.session_state.tracking_start = None
+if "editing_log_id" not in st.session_state: st.session_state.editing_log_id = None # 🚨【新設】編集中のログID管理用
 
-def check_overlap(date_str, start_str, end_str, df_check_log):
+# 重複チェック（自分自身の古いデータ(exclude_id)は除外してチェックできるように拡張）
+def check_overlap(date_str, start_str, end_str, df_check_log, exclude_id=None):
     if df_check_log.empty: return False, None
+    df_check = df_check_log.copy()
+    if exclude_id is not None:
+        df_check = df_check[df_check["id"] != exclude_id]
+    if df_check.empty: return False, None
+    
     new_start = pd.to_datetime(f"{date_str} {start_str}")
     new_end = pd.to_datetime(f"{date_str} {end_str}")
     if new_end <= new_start: new_end += pd.Timedelta(days=1)
-    df_check = df_check_log.copy()
+    
     df_check["Start_dt"] = pd.to_datetime(df_check["日付"] + " " + df_check["開始時刻"])
     df_check["End_dt"] = pd.to_datetime(df_check["日付"] + " " + df_check["終了時刻"])
     df_check.loc[df_check["End_dt"] < df_check["Start_dt"], "End_dt"] += pd.Timedelta(days=1)
@@ -191,23 +198,22 @@ if not ui_log.empty:
         # 開始時刻順に並び替え
         df_day = df_day.sort_values("開始時刻")
         
-        # 🚨【安全対策】45分未満の短い予定は、エラーとなる制限プロパティを使わず、あらかじめ中の文字を空にする
+        # 45分未満の短い予定は、あらかじめ中の文字を空にする
         df_day["グラフ内文字"] = df_day.apply(
             lambda r: r["カテゴリ"] if ((pd.to_datetime(r["日付"] + " " + r["終了時刻"]) - pd.to_datetime(r["日付"] + " " + r["開始時刻"])).total_seconds() / 60.0) >= 45 else "",
             axis=1
         )
         
-        # 🚨【改善】太く大きく表示するため height=180 に拡大
+        # 太く大きく表示するため height=180 に拡大
         fig = px.timeline(
             df_day, x_start="Start_dt", x_end="End_dt", y="日付", color="カテゴリ", 
             text="グラフ内文字", hover_name="内容", height=180, color_discrete_map=dynamic_colors
         )
         
-        # Plotlyに安全なプロパティのみを適用してテキスト設定
         fig.update_traces(
             textposition='inside', 
             insidetextanchor='middle', 
-            textfont_size=15,         # 文字サイズを15pxに拡大
+            textfont_size=15,         
             textfont_color="#1C1E21",  
             marker_line_width=0
         )
@@ -219,37 +225,23 @@ if not ui_log.empty:
             
             if duration_minutes < 45:
                 mid_dt = row["Start_dt"] + (row["End_dt"] - row["Start_dt"]) / 2
-                
-                # グラフが太くなったことに合わせて、引き出し線の長さを微調整（35/65 → 45/75）
                 ay_val = 45 if (i % 2 == 0) else 75
                 display_text = f"<b>{row['カテゴリ']}</b> <span style='font-size:11px; color:#666;'>{row['開始時刻']}~</span>"
                 
                 annotations.append(dict(
-                    x=mid_dt,
-                    y=date_str,
-                    xref="x", yref="y",
-                    text=display_text,
-                    showarrow=True,
-                    arrowhead=2,
-                    arrowsize=1,
-                    arrowwidth=1.2,
-                    arrowcolor="#999999",
-                    ax=0,
-                    ay=ay_val,
-                    font=dict(size=12, color="#1C1E21"),
-                    bgcolor="rgba(255, 255, 255, 0.9)",
-                    bordercolor="rgba(0,0,0,0.1)",
-                    borderwidth=1,
-                    borderpad=3
+                    x=mid_dt, y=date_str, xref="x", yref="y", text=display_text, showarrow=True,
+                    arrowhead=2, arrowsize=1, arrowwidth=1.2, arrowcolor="#999999", ax=0, ay=ay_val,
+                    font=dict(size=12, color="#1C1E21"), bgcolor="rgba(255, 255, 255, 0.9)",
+                    bordercolor="rgba(0,0,0,0.1)", borderwidth=1, borderpad=3
                 ))
             
         fig.update_layout(
             xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True, tickfont=dict(color="#555", size=13, weight="bold")),
             yaxis=dict(title="", showticklabels=False, fixedrange=True),
-            bargap=0, # 🚨【改善】棒グラフの上下の余白をゼロにして限界まで太くする設定
+            bargap=0, 
             showlegend=False, 
             dragmode=False, 
-            margin=dict(l=10, r=10, t=10, b=85), # 引き出し線の余白確保
+            margin=dict(l=10, r=10, t=10, b=85), 
             plot_bgcolor='rgba(0,0,0,0)', 
             paper_bgcolor='rgba(0,0,0,0)',
             annotations=annotations 
@@ -284,7 +276,8 @@ m4, m5, m6 = st.columns(3)
 with m4:
     if st.button("⚙️ 固定", type="primary" if st.session_state.app_mode == "⚙️ 固定" else "secondary", use_container_width=True): change_mode("⚙️ 固定"); st.rerun()
 with m5:
-    if st.button("📜 削除", type="primary" if st.session_state.app_mode == "📜 削除" else "secondary", use_container_width=True): change_mode("📜 削除"); st.rerun()
+    # 🚨【ボタン名変更】「📜 削除」から「📜 編集・削除」に変更
+    if st.button("📜 編集・削除", type="primary" if st.session_state.app_mode == "📜 編集・削除" else "secondary", use_container_width=True): change_mode("📜 編集・削除"); st.rerun()
 with m6:
     if st.button("🏷️ カテゴリ", type="primary" if st.session_state.app_mode == "🏷️ カテゴリ" else "secondary", use_container_width=True): change_mode("🏷️ カテゴリ"); st.rerun()
 
@@ -292,7 +285,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 mode = st.session_state.app_mode
 
 # ----------------------------
-# 各種モードの処理（データベース連携版）
+# 各種モードの処理
 # ----------------------------
 if mode == "⏱️ 計測":
     if st.session_state.tracking_start is None:
@@ -301,14 +294,14 @@ if mode == "⏱️ 計測":
             rt_cat = st.selectbox("カテゴリを選ぶ", st.session_state.categories, key="rt_cat")
             if st.button("▶️ 今からスタート！", type="primary", use_container_width=True):
                 st.session_state.tracking_cat = rt_cat
-                st.session_state.tracking_start = get_now_jst() # 🚨【修正】スタート時間を正しい日本時間に
+                st.session_state.tracking_start = get_now_jst() 
                 st.rerun()
     else:
         st.success(f"⏳ 現在 **{st.session_state.tracking_cat}** を計測中です！\n\n実際の開始: {st.session_state.tracking_start.strftime('%H:%M')}")
         rt_detail = st.text_input("メモ（任意）", key="rt_detail")
         
         if st.button("⏹️ 今終わった！（15分単位で記録）", type="primary", use_container_width=True):
-            end_dt = get_now_jst() # 🚨【修正】終了時間を正しい日本時間に
+            end_dt = get_now_jst() 
             start_rounded = round_to_15(st.session_state.tracking_start)
             end_rounded = round_to_15(end_dt)
             if start_rounded == end_rounded: end_rounded += timedelta(minutes=15)
@@ -374,7 +367,7 @@ elif mode == "📊 分析":
     if not ui_log.empty:
         df_analysis = ui_log.copy()
         df_analysis["Date_obj"] = pd.to_datetime(df_analysis["日付"]).dt.date
-        today = get_now_jst().date() # 🚨【修正】分析の基準日も日本時間（JST）にする
+        today = get_now_jst().date() 
         
         if period == "今日": df_filtered = df_analysis[df_analysis["Date_obj"] == today]
         elif period == "過去7日間": df_filtered = df_analysis[df_analysis["Date_obj"] >= (today - timedelta(days=6))]
@@ -382,7 +375,6 @@ elif mode == "📊 分析":
         else: df_filtered = df_analysis
             
         if not df_filtered.empty:
-            # 「時間（h）」の計算（深夜またぎも考慮）
             df_filtered["Start_dt"] = pd.to_datetime(df_filtered["日付"] + " " + df_filtered["開始時刻"])
             df_filtered["End_dt"] = pd.to_datetime(df_filtered["日付"] + " " + df_filtered["終了時刻"])
             df_filtered.loc[df_filtered["End_dt"] < df_filtered["Start_dt"], "End_dt"] += pd.Timedelta(days=1)
@@ -391,49 +383,112 @@ elif mode == "📊 分析":
             sum_df = df_filtered.groupby("カテゴリ")["時間（h）"].sum().reset_index()
             total_hours = round(sum_df["時間（h）"].sum(), 1)
             
-            # 円グラフの設定
             fig_pie = px.pie(sum_df, values='時間（h）', names='カテゴリ', color='カテゴリ', color_discrete_map=dynamic_colors, hole=0.4)
-            
-            # 文字の位置を「外側（outside）」に強制
-            fig_pie.update_traces(
-                textinfo='percent+label', 
-                textposition='outside', 
-                marker_line_width=0
-            )
-            
-            # 真ん中の合計時間表示
+            fig_pie.update_traces(textinfo='percent+label', textposition='outside', marker_line_width=0)
             fig_pie.add_annotation(text=f"<b>計 {total_hours}h</b>", x=0.5, y=0.5, font_size=18, showarrow=False)
-            
-            fig_pie.update_layout(
-                showlegend=False, 
-                margin=dict(t=40, b=40, l=40, r=40), 
-                height=380, 
-                plot_bgcolor='rgba(0,0,0,0)', 
-                paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(size=14)
-            )
+            fig_pie.update_layout(showlegend=False, margin=dict(t=40, b=40, l=40, r=40), height=380, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(size=14))
             
             st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
             
-            # 🚨【新設】円グラフの真下に表示する詳細データ表（ランキング形式）
             st.markdown(f"<p style='font-size:1.0rem; font-weight:bold; color:#555; margin-bottom:5px;'>📋 「{period}」のカテゴリ別詳細</p>", unsafe_allow_html=True)
-            
-            # 合計時間が長い順（降順）に並び替える
             df_table = sum_df.sort_values(by="時間（h）", ascending=False).copy()
-            
-            # パーセント（％）と合計時間をテキスト化
             df_table["割合"] = (df_table["時間（h）"] / total_hours * 100).round(1).astype(str) + " %"
             df_table["合計時間"] = df_table["時間（h）"].round(1).astype(str) + " 時間"
-            
-            # 不要な列を削って並び替え
             df_table = df_table[["カテゴリ", "合計時間", "割合"]]
-            
-            # Streamlitの綺麗なテーブル形式で表示（インデックスは非表示）
             st.dataframe(df_table, use_container_width=True, hide_index=True)
             st.markdown("<br>", unsafe_allow_html=True)
             
             st.info(f"💡 「{period}」の合計記録時間は **{total_hours} 時間** です。")
         else: st.warning("この期間の記録はありません。")
+    else: st.write("データがありません。")
+
+# 🚨【大幅リニューアル】変更（編集）機能を追加
+elif mode == "📜 編集・削除":
+    st.markdown(f"#### {date_str} の記録・編集")
+    if not ui_log.empty:
+        df_edit_target = ui_log[ui_log["日付"] == date_str].copy()
+        if df_edit_target.empty: 
+            st.write("今日の記録はありません。")
+        else:
+            # 開始時刻順に並べて表示
+            df_edit_target = df_edit_target.sort_values("開始時刻")
+            
+            for _, row in df_edit_target.iterrows():
+                # 今このカードが「編集モード」かどうかを判定
+                is_editing = (st.session_state.editing_log_id == row["id"])
+                
+                st.markdown(f"<div class='list-card'>", unsafe_allow_html=True)
+                
+                if not is_editing:
+                    # 通常表示モード
+                    c1, c2, c3 = st.columns([3.5, 1, 1])
+                    with c1:
+                        st.markdown(f"**{row['開始時刻']} 〜 {row['終了時刻']}**")
+                        st.markdown(f"**{row['カテゴリ']}** <small>{row['内容']}</small>", unsafe_allow_html=True)
+                    with c2:
+                        if st.button("✏️", key=f"edit_btn_{row['id']}", use_container_width=True):
+                            st.session_state.editing_log_id = row["id"]
+                            st.rerun()
+                    with c3:
+                        if st.button("🗑️", key=f"del_l_{row['id']}", use_container_width=True):
+                            supabase.table("timeline_data").delete().eq("id", row['id']).execute()
+                            st.session_state.need_reload = True
+                            st.rerun()
+                else:
+                    # ✏️ インライン編集モード
+                    st.markdown("<p style='font-size:0.85rem; color:#f03e3e; font-weight:bold;'>📝 データを編集中...</p>", unsafe_allow_html=True)
+                    
+                    # 既存の時間を time オブジェクトに直して初期値にする
+                    try:
+                        sh, sm = map(int, row["開始時刻"].split(":"))
+                        eh, em = map(int, row["終了時刻"].split(":"))
+                        init_start = time(sh, sm)
+                        init_end = time(eh, em)
+                    except:
+                        init_start = time(9, 0)
+                        init_end = time(10, 0)
+                    
+                    # フォーム用の入力欄
+                    edit_cat = st.selectbox("カテゴリ", st.session_state.categories, index=st.session_state.categories.index(row["カテゴリ"]) if row["カテゴリ"] in st.session_state.categories else 0, key=f"ed_cat_{row['id']}")
+                    
+                    col_t1, col_t2 = st.columns(2)
+                    with col_t1: edit_start = st.time_input("開始時刻", init_start, key=f"ed_start_{row['id']}")
+                    with col_t2: edit_end = st.time_input("終了時刻", init_end, key=f"ed_end_{row['id']}")
+                    
+                    edit_detail = st.text_input("メモ内容", value=row["内容"], key=f"ed_det_{row['id']}")
+                    
+                    # 保存とキャンセルのボタン
+                    cb1, cb2 = st.columns(2)
+                    with cb1:
+                        if st.button("💾 変更を保存", type="primary", key=f"save_btn_{row['id']}", use_container_width=True):
+                            new_s_str = edit_start.strftime("%H:%M")
+                            new_e_str = edit_end.strftime("%H:%M")
+                            
+                            if new_s_str == new_e_str:
+                                st.error("⚠️ 開始と終了が同じ時刻です。")
+                            else:
+                                # 自分自身の時間枠を除外して重複チェック
+                                is_overlap, overlap_cat = check_overlap(date_str, new_s_str, new_e_str, ui_log, exclude_id=row["id"])
+                                if is_overlap:
+                                    st.error(f"⚠️ 変更後の時間が「{overlap_cat}」と重なっています！")
+                                else:
+                                    # データベースを更新（UPDATE）
+                                    supabase.table("timeline_data").update({
+                                        "start_time": new_s_str,
+                                        "end_time": new_e_str,
+                                        "category": edit_cat,
+                                        "detail": edit_detail if edit_detail else "（未入力）"
+                                    }).eq("id", row['id']).execute()
+                                    
+                                    st.session_state.editing_log_id = None # 編集モード終了
+                                    st.session_state.need_reload = True
+                                    st.rerun()
+                    with cb2:
+                        if st.button("❌ キャンセル", key=f"cancel_btn_{row['id']}", use_container_width=True):
+                            st.session_state.editing_log_id = None
+                            st.rerun()
+                            
+                st.markdown("</div>", unsafe_allow_html=True)
     else: st.write("データがありません。")
 
 elif mode == "⚙️ 固定":
@@ -468,26 +523,6 @@ elif mode == "⚙️ 固定":
                     st.session_state.need_reload = True
                     st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
-
-elif mode == "📜 削除":
-    st.markdown(f"#### {date_str} の記録")
-    if not ui_log.empty:
-        df_edit_target = ui_log[ui_log["日付"] == date_str]
-        if df_edit_target.empty: st.write("今日の記録はありません。")
-        else:
-            for _, row in df_edit_target.iterrows():
-                st.markdown(f"<div class='list-card'>", unsafe_allow_html=True)
-                c1, c2 = st.columns([4, 1])
-                with c1:
-                    st.markdown(f"**{row['開始時刻']} 〜 {row['終了時刻']}**")
-                    st.markdown(f"**{row['カテゴリ']}** <small>{row['内容']}</small>", unsafe_allow_html=True)
-                with c2:
-                    if st.button("🗑️", key=f"del_l_{row['id']}", use_container_width=True):
-                        supabase.table("timeline_data").delete().eq("id", row['id']).execute()
-                        st.session_state.need_reload = True
-                        st.rerun()
-                st.markdown("</div>", unsafe_allow_html=True)
-    else: st.write("データがありません。")
 
 elif mode == "🏷️ カテゴリ":
     st.markdown("#### カテゴリの編集")
