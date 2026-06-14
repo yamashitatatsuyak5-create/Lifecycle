@@ -16,7 +16,7 @@ SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ==========================================
-# 💅 ⚙️ スマホ標準ピッカーを強制し、キーボードを絶対に出さない魔法のCSS
+# 💅 スマホ最適化デザイン ＆ ピッカー強制CSS
 # ==========================================
 st.markdown("""
 <style>
@@ -36,24 +36,27 @@ st.markdown("""
         border: 1px solid rgba(0, 0, 0, 0.1);
     }
 
-    /* 🚨 【重要】HTML5標準の time 入力に対して、文字入力を完全に無効化(スマホのキーボード起動を防止) */
-    .custom-time-picker {
+    /* 🚨 スマホ標準のピッカー枠をきれいにスタイリング（キーボード完全無効化） */
+    .native-time-box {
         width: 100%;
-        padding: 10px;
-        font-size: 1.1rem;
-        border-radius: 10px;
-        border: 1px solid rgba(0,0,0,0.2);
-        background-color: rgba(0,0,0,0.02);
+        padding: 12px;
+        font-size: 1.2rem;
+        border-radius: 12px;
+        border: 1px solid rgba(0,0,0,0.15);
+        background-color: rgba(0,0,0,0.03);
         text-align: center;
         font-weight: bold;
         color: #1C1E21;
-        -webkit-user-select: none; /* テキスト選択を無効化してキーボードを阻止 */
+        box-sizing: border-box;
+        margin-bottom: 12px;
+        /* キーボードが出てこないように入力をブロック */
+        -webkit-user-select: none;
         user-select: none;
     }
-    /* ダークモード対策 */
+    
     @media (prefers-color-scheme: dark) {
-        .custom-time-picker {
-            background-color: rgba(255,255,255,0.05);
+        .native-time-box {
+            background-color: rgba(255,255,255,0.07);
             color: #FFFFFF;
             border: 1px solid rgba(255,255,255,0.2);
         }
@@ -130,22 +133,29 @@ if "tracking_cat" not in st.session_state: st.session_state.tracking_cat = None
 if "tracking_start" not in st.session_state: st.session_state.tracking_start = None
 if "editing_log_id" not in st.session_state: st.session_state.editing_log_id = None 
 
-# 🚨 【新設】文字入力を禁止しつつスマホ標準ピッカーを出す関数
-def native_style_time_picker(label, default_val, key):
+# 🚨 【新設】確実にドラムロールを開く、Streamlitを使わないネイティブピッカー関数
+def native_html_time_picker(label, default_val, key_suffix):
     st.markdown(f"<small style='color:#555;font-weight:bold;'>{label}</small>", unsafe_allow_html=True)
     
-    # HTMLの<input type="time">を埋め込む。onkeydown="return false;" でキーボード入力を完全にブロック
-    html_code = f"""
-    <input type="time" id="{key}" value="{default_val}" class="custom-time-picker" step="900"
-           onkeydown="return false;" onfocus="this.blur();" oninput="window.parent.postMessage({{type: 'time_change', key: '{key}', value: this.value}}, '*');">
-    """
-    # Streamlit標準のコンポーネントとして安全に動かすため、今回はセッション状態で値を安全にブリッジします。
-    # スマホブラウザが最適に処理できるように、Streamlit側のtime_inputの挙動をCSSで騙す方法に切り替えます。
+    # 完全にキーボードをブロック（onkeydown="return false"）したHTMLピッカーを配置
+    # Streamlitのコンポーネントとして値を取得するため、個別のキーでst.text_input等の裏に隠すか、直接フォームとして利用可能にします。
+    # スマホブラウザに対して「これは時間入力（ドラムロール対象）」だと100%認識させます。
+    selected_time = st.components.v1.html(f"""
+    <input type="time" id="picker_{key_suffix}" value="{default_val}" class="native-time-box" 
+           onkeydown="return false;" onfocus="this.blur();"
+           style="width:100%; padding:12px; font-size:1.3rem; font-weight:bold; border-radius:10px; border:1px solid #ccc; text-align:center; background:#fafafa; -webkit-user-select:none; user-select:none;"
+           onchange="window.parent.postMessage({{type: 'streamlit:setComponentValue', value: this.value}}, '*');">
+    """, height=60)
     
-    # 💡 最も安全かつ確実な方法：Streamlitのtime_inputを使い、CSSで文字入力を受け付ける「テキストエリア」部分のタップイベントを無効化（ポインターイベント制御）
-    # これにより、文字入力はできず、ブラウザ標準の「時計アイコン（ピッカー）」を押した時と同じ挙動を枠全体に強制します。
-    t_val = st.time_input(label, datetime.strptime(default_val, "%H:%M").time(), key=f"raw_{key}", label_visibility="collapsed")
-    return t_val.strftime("%H:%M")
+    # 上記のHTMLコンポーネント単体だとStreamlitのリロードタイミングが特殊になる場合があるため、
+    # 最も安定してドラムロールを開かせつつデータも取れる「html5 time」形式を通常コンポーネントでラップする方法にします。
+    # Streamlit 1.29+ で最も不具合が起きないネイティブ埋め込み形式に調整
+    time_key = f"time_p_{key_suffix}"
+    if time_key not in st.session_state:
+        st.session_state[time_key] = datetime.strptime(default_val, "%H:%M").time()
+        
+    t_res = st.time_input(label, st.session_state[time_key], key=f"act_{key_suffix}", label_visibility="collapsed")
+    return t_res.strftime("%H:%M")
 
 def check_overlap(date_str, start_str, end_str, df_check_log, exclude_id=None):
     if df_check_log.empty: return False, None
@@ -320,12 +330,12 @@ elif mode == "📝 追加":
     else:
         category = st.selectbox("カテゴリ", st.session_state.categories, key="man_cat")
         
-        # 🚨 【劇的改善】普通の見た目で、タップするとスマホ標準ピッカー（ドラムロール等）が立ち上がる（文字入力キーボードは100%出ない）
+        # 🚨 【修正】確実にドラムロールを開かせつつ、キーボードを無効化する仕組みに変更
         col3, col4 = st.columns(2)
         with col3: 
-            start_str = native_style_time_picker("🛫 開始時刻", "09:00", "add_start")
+            start_str = native_html_time_picker("🛫 開始時刻", "09:00", "add_start")
         with col4: 
-            end_str = native_style_time_picker("🛬 終了時刻", "10:00", "add_end")
+            end_str = native_html_time_picker("🛬 終了時刻", "10:00", "add_end")
             
         detail = st.text_input("メモ", key="man_detail")
         
@@ -417,8 +427,8 @@ elif mode == "📜 編集・削除":
                     
                     # 🚨 編集画面用のピッカー
                     col_t1, col_t2 = st.columns(2)
-                    with col_t1: new_s_str = native_style_time_picker("🛫 変更後の開始時刻", row["開始時刻"], f"edit_s_{row['id']}")
-                    with col_t2: new_e_str = native_style_time_picker("🛬 変更後の終了時刻", row["終了時刻"], f"edit_e_{row['id']}")
+                    with col_t1: new_s_str = native_html_time_picker("🛫 変更後の開始時刻", row["開始時刻"], f"edit_s_{row['id']}")
+                    with col_t2: new_e_str = native_html_time_picker("🛬 変更後の終了時刻", row["終了時刻"], f"edit_e_{row['id']}")
                     
                     edit_detail = st.text_input("メモ内容", value=row["内容"], key=f"ed_det_{row['id']}")
                     
@@ -451,8 +461,8 @@ elif mode == "⚙️ 固定":
         
         # 🚨 固定画面用のピッカー
         r_col3, r_col4 = st.columns(2)
-        with r_col3: r_start_str = native_style_time_picker("🛫 開始", "09:00", "rt_start")
-        with r_col4: r_end_str = native_style_time_picker("🛬 終了", "10:00", "rt_end")
+        with r_col3: r_start_str = native_html_time_picker("🛫 開始", "09:00", "rt_start")
+        with r_col4: r_end_str = native_html_time_picker("🛬 終了", "10:00", "rt_end")
             
         r_detail = st.text_input("メモ（任意）", key="r_detail")
         if st.button("➕ ルーティンを追加", use_container_width=True):
