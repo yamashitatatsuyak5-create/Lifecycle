@@ -56,6 +56,31 @@ div[data-testid^="stDateInput"],
 div[data-testid^="stTimeInput"] {
     -webkit-tap-highlight-color: transparent !important;
 }
+/* キーボードが出ても見えないよう画面外に押し出す */
+@media (max-width: 768px) {
+    .ReactVirtualized__Grid input,
+    input[type="text"]:focus {
+        position: fixed !important;
+        left: -9999px !important;
+        top: -9999px !important;
+        opacity: 0 !important;
+    }
+    
+    /* iOS Safari 特有：VirtualKeyboard API が起動しても画面に出ない */
+    input {
+        font-size: 16px !important;  /* iOS は 16px 未満だと zoom するのでこれを逆利用 */
+    }
+}
+
+/* Streamlit selectbox の input を徹底的に消す */
+div[data-testid^="stSelect"] input:focus,
+div[data-testid^="stDateInput"] input:focus,
+div[data-testid^="stTimeInput"] input:focus {
+    position: absolute !important;
+    left: -10000px !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
 </style>
 
 <script>
