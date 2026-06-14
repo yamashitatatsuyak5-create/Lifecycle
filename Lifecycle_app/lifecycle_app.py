@@ -22,7 +22,9 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # -------------------------------------------------
 # CSS ＆ “スマホキーボード殺し” JavaScript
 # -------------------------------------------------
-st.markdown("""
+# -------------------------------------------------
+# CSS ＆ JavaScript
+# -------------------------------------------------
 st.markdown("""
 <style>
 [data-testid="stHeader"]{visibility:hidden;}
@@ -34,60 +36,6 @@ div.stButton>button{border-radius:12px!important;font-weight:bold!important;}
     border:1px solid rgba(0,0,0,.1);
 }
 </style>
-""", unsafe_allow_html=True)
-
-<script>
-(function(){
-    
-    // フォーカスが当たった input を即座に blur
-    const monitorFocus = () => {
-        setInterval(() => {
-            const active = document.activeElement;
-            if (!active || active.tagName !== 'INPUT') return;
-            
-            const isSelectInput = 
-                active.closest('div[data-testid^="stSelect"]')    ||
-                active.closest('div[data-testid^="stDateInput"]') ||
-                active.closest('div[data-testid^="stTimeInput"]');
-            
-            if (isSelectInput) {
-                active.blur();
-                isSelectInput.click();
-            }
-        }, 50);
-    };
-    
-    // タップ時にドロップダウンを開く
-    const setupClickHandlers = () => {
-        const q = `
-            div[data-testid^="stSelect"],
-            div[data-testid^="stDateInput"],
-            div[data-testid^="stTimeInput"]`;
-        
-        document.addEventListener('touchstart', (e) => {
-            const target = e.target.closest(q);
-            if (target) {
-                target.querySelectorAll('input').forEach(inp => {
-                    inp.readOnly = true;
-                    inp.inputMode = 'none';
-                });
-                target.click();
-            }
-        }, { passive: true });
-    };
-    
-    // 実行
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            monitorFocus();
-            setupClickHandlers();
-        });
-    } else {
-        monitorFocus();
-        setupClickHandlers();
-    }
-})();
-</script>
 """, unsafe_allow_html=True)
 # -------------------------------------------------
 # 定数 & ユーティリティ
