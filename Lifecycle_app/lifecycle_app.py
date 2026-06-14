@@ -23,6 +23,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # CSS ＆ “スマホキーボード殺し” JavaScript
 # -------------------------------------------------
 st.markdown("""
+st.markdown("""
 <style>
 [data-testid="stHeader"]{visibility:hidden;}
 .block-container{padding-top:1rem;padding-bottom:5rem;}
@@ -32,56 +33,8 @@ div.stButton>button{border-radius:12px!important;font-weight:bold!important;}
     padding:15px;border-radius:15px;margin-bottom:10px;
     border:1px solid rgba(0,0,0,.1);
 }
-
-/* ============================================ */
-/* selectbox のキーボード非表示（pointer-events なし） */
-/* ============================================ */
-
-/* input を readonly に */
-div[data-testid^="stSelect"] input,
-div[data-testid^="stDateInput"] input,
-div[data-testid^="stTimeInput"] input {
-    -webkit-user-select: none !important;
-    user-select: none !important;
-    outline: none !important;
-    caret-color: transparent !important;
-}
-
-/* フォーカス時：キーボードを画面外に隠す */
-div[data-testid^="stSelect"] input:focus,
-div[data-testid^="stDateInput"] input:focus,
-div[data-testid^="stTimeInput"] input:focus {
-    position: fixed !important;
-    left: -10000px !important;
-    top: -10000px !important;
-    opacity: 0 !important;
-    clip-path: inset(9999px) !important;
-}
-
-/* iOS Safari 特有対策 */
-@supports (-webkit-touch-callout: none) {
-    div[data-testid^="stSelect"] input:focus,
-    div[data-testid^="stDateInput"] input:focus,
-    div[data-testid^="stTimeInput"] input:focus {
-        position: fixed !important;
-        left: -9999px !important;
-        top: -9999px !important;
-        font-size: 0 !important;
-        border: 0 !important;
-        padding: 0 !important;
-        margin: 0 !important;
-    }
-}
-
-/* Android Chrome 対策 */
-@media (max-width: 768px) and (min-width: 320px) {
-    input[type="text"]:focus {
-        position: fixed !important;
-        bottom: -10000px !important;
-        left: -10000px !important;
-    }
-}
 </style>
+""", unsafe_allow_html=True)
 
 <script>
 (function(){
@@ -250,20 +203,42 @@ dynamic_colors = {c: PASTEL_PALETTE[i%len(PASTEL_PALETTE)]
 # 共通関数
 # -------------------------------------------------
 def split_time_selectbox(label, default_h, default_m, key_suffix):
-    st.markdown(f"<small style='color:#555;font-weight:bold;'>{label}</small>", unsafe_allow_html=True)
-    hours = [f"{i:02d}" for i in range(24)]
+    """
+    時間：数字キーボードで直接入力
+    分：selectbox（ドラムロール）
+    """
+    st.markdown(f"<small style='color:#555;font-weight:bold;'>{label}</small>", 
+                unsafe_allow_html=True)
+    
     minutes = ["00","15","30","45"]
-    c_h,c_m = st.columns(2)
+    dm = f"{int(default_m):02d}" if f"{int(default_m):02d}" in minutes else "00"
+    
+    c_h, c_m = st.columns(2)
+    
+    # --- 時間：数字キーボード入力 ---
     with c_h:
-        h = st.selectbox("時", hours,
-                         index=hours.index(f"{int(default_h):02d}"),
-                         key=f"h_{key_suffix}", label_visibility="collapsed")
+        h_val = st.number_input(
+            "時",
+            min_value=0,
+            max_value=23,
+            value=int(default_h),
+            step=1,
+            key=f"h_{key_suffix}",
+            label_visibility="collapsed"
+        )
+        h_str = f"{int(h_val):02d}"
+    
+    # --- 分：selectbox（ドラムロール） ---
     with c_m:
-        m = st.selectbox("分", minutes,
-                         index=minutes.index(f"{int(default_m):02d}")
-                         if f"{int(default_m):02d}" in minutes else 0,
-                         key=f"m_{key_suffix}", label_visibility="collapsed")
-    return f"{h}:{m}"
+        m_str = st.selectbox(
+            "分",
+            minutes,
+            index=minutes.index(dm),
+            key=f"m_{key_suffix}",
+            label_visibility="collapsed"
+        )
+    
+    return f"{h_str}:{m_str}"
 
 def check_overlap(date_str, s_str, e_str, df, exclude_id=None):
     if df.empty: return False,None
