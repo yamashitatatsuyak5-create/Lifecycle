@@ -32,61 +32,47 @@ div.stButton>button{border-radius:12px!important;font-weight:bold!important;}
     padding:15px;border-radius:15px;margin-bottom:10px;
     border:1px solid rgba(0,0,0,.1);
 }
+/* ▼▼ 追加：selectbox 内 input を完全にタップ不可にする ▼▼ */
+div[data-testid^="stSelect"] input,
+div[data-testid^="stDateInput"] input,
+div[data-testid^="stTimeInput"] input{
+    pointer-events:none!important;      /* タップ出来ない = フォーカス出来ない */
+    caret-color:transparent!important;  /* キャレットも非表示 */
+}
 </style>
 
 <script>
-function lockStreamlitInputs() {
+/* すべての Streamlit セレクト系コンポーネントを
+   “タップでドロップダウンのみ開いてキーボードは出さない”
+   ように改造するスクリプト                                    */
+(function(){
 
-  const process = () => {
-    // selectbox / date_input / time_input の “検索 input”
+  function hackAll(){
     const q = `
-      div[data-testid^="stSelect"]    input,
-      div[data-testid^="stDateInput"] input,
-      div[data-testid^="stTimeInput"] input`;
-    const inputs = window.parent.document.querySelectorAll(q);
+      div[data-testid^="stSelect"],
+      div[data-testid^="stDateInput"],
+      div[data-testid^="stTimeInput"]`;
+    document.querySelectorAll(q).forEach(box=>{
+      if(box.dataset.hacked) return;          // 既に処理済み
 
-    inputs.forEach(inp=>{
-      if (inp.dataset.locked) return;          // 既に処理済み
+      // ▼▼ input は既に pointer-events:none にしてあるので
+      //    ここでは親(box)にクリックを当てるだけで OK
+      box.addEventListener('touchstart',e=>{
+        // touchstart の段階で “自分自身” へ focus/blur させて
+        // ネイティブドロップダウンを表示
+        box.click();
+      },{passive:true});
+      box.addEventListener('mousedown',e=>box.click(),{passive:true});
 
-      // 1) 物理入力／ソフト KB を根本的に無効化
-      inp.readOnly  = true;
-      inp.inputMode = 'none';
-      inp.style.caretColor = 'transparent';
-
-      // 2) フォーカスが当たる「前」に止める
-      const openDropdown = () => {
-        const combo = inp.closest('div[role="combobox"]');
-        if (combo) combo.click();              // ドロップダウンを開く
-      };
-
-      // iOS Safari = touchstart, Android Chrome = mousedown が最初に発火
-      ['touchstart','mousedown'].forEach(evt=>{
-        inp.addEventListener(evt, e=>{
-          e.preventDefault();                  // フォーカスさせない
-          openDropdown();
-        }, {passive:false});
-      });
-
-      // 念のため focus しても瞬時に blur
-      inp.addEventListener('focus', ()=>inp.blur(), {passive:true});
-
-      inp.dataset.locked = 'true';
+      box.dataset.hacked = 'true';
     });
-  };
-
-  // 初回 & DOM 変化時
-  process();
-  new MutationObserver(process)
-    .observe(window.parent.document,{childList:true,subtree:true});
-}
-
-if (window.parent) {
-  if (document.readyState === 'loading') {
-    window.parent.addEventListener('DOMContentLoaded', lockStreamlitInputs);
-  } else {
-    lockStreamlitInputs();
   }
-}
+
+  // 初回 & DOM 変化時に実行
+  hackAll();
+  new MutationObserver(hackAll)
+    .observe(document,{childList:true,subtree:true});
+})();
 </script>
 """, unsafe_allow_html=True)
 
