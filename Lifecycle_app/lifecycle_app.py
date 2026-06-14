@@ -18,27 +18,42 @@ SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ==========================================
-# 💅 スマホに特化した見やすいデザイン（超シンプル・安全版）
+# 💅 スマホに特化した見やすいデザイン ＋ キーボード対策CSS
 # ==========================================
 st.markdown("""
 <style>
-    /* ヘッダーの非表示と画面の余白調整だけを行う */
+    /* ヘッダーの非表示と画面の余白調整 */
     [data-testid="stHeader"] { visibility: hidden; }
     .block-container { padding-top: 1rem; padding-bottom: 5rem; }
     
-    /* ボタンのカドを少し丸くしてスマホっぽくする */
+    /* ボタンのデザイン */
     div.stButton > button {
         border-radius: 15px !important;
         font-weight: bold !important;
     }
     
-    /* 履歴カード（削除・固定タブ）の見た目調整 */
+    /* 履歴カード */
     .list-card {
-        background-color: rgba(0, 0, 0, 0.03); /* どのモードでも薄く見える背景 */
+        background-color: rgba(0, 0, 0, 0.03);
         padding: 15px; 
         border-radius: 15px; 
         margin-bottom: 10px;
         border: 1px solid rgba(0, 0, 0, 0.1);
+    }
+
+    /* 🚨 ラジオボタン（時間選択）を横並びにしてスマホで押しやすくするスタイル */
+    div[data-testid="stRadio"] > div {
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        gap: 6px !important;
+    }
+    div[data-testid="stRadio"] label {
+        background-color: rgba(0,0,0,0.05);
+        padding: 6px 12px !important;
+        border-radius: 10px !important;
+        margin: 0 !important;
+        min-width: 45px;
+        text-align: center;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -46,7 +61,6 @@ st.markdown("""
 WEEKDAYS = ["月", "火", "水", "木", "金", "土", "日"]
 PASTEL_PALETTE = ["#B3E5FC", "#C8E6C9", "#FFF59D", "#FFE0B2", "#E1BEE7", "#FFCDD2", "#F8BBD0", "#CFD8DC", "#D7CCC8", "#FFE082"]
 
-# パスワードを暗号化する関数（セキュリティ対策）
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -72,7 +86,7 @@ if st.session_state.current_user is None:
                 st.error("ユーザー名かパスワードが違います。")
                 
     with tab_signup:
-        st.write("初めての方はこちら👇（友達もここから作れます！）")
+        st.write("初めての方はこちら👇")
         signup_name = st.text_input("好きなユーザー名", key="signup_name")
         signup_pass = st.text_input("好きなパスワード", type="password", key="signup_pass")
         if st.button("アカウントを作成する", type="primary", use_container_width=True):
@@ -90,7 +104,7 @@ if st.session_state.current_user is None:
     st.stop()
 
 # ==========================================
-# 🚀 ログイン成功後（メインアプリ）
+# 🚀 メインアプリ
 # ==========================================
 user_name = st.session_state.current_user
 
@@ -105,7 +119,6 @@ def load_db_data():
     res_routine = supabase.table("timeline_routine").select("*").eq("user_name", user_name).execute()
     df_rt = pd.DataFrame(res_routine.data) if res_routine.data else pd.DataFrame(columns=["id", "weekday", "start_time", "end_time", "category", "detail"])
     st.session_state.ui_routine = df_rt.rename(columns={"weekday": "曜日", "start_time": "開始時刻", "end_time": "終了時刻", "category": "カテゴリ", "detail": "内容"})
-    
     st.session_state.need_reload = False
 
 if "need_reload" not in st.session_state or st.session_state.need_reload:
@@ -124,17 +137,24 @@ if "tracking_cat" not in st.session_state: st.session_state.tracking_cat = None
 if "tracking_start" not in st.session_state: st.session_state.tracking_start = None
 if "editing_log_id" not in st.session_state: st.session_state.editing_log_id = None 
 
-# 🚨【新設】キーボードを出さないための「15分単位」の時間選択肢リストを生成 (00:00 〜 23:45)
-TIME_OPTIONS = []
-for h in range(24):
-    for m in [0, 15, 30, 45]:
-        TIME_OPTIONS.append(f"{h:02d}:{m:02d}")
+# 🚨 キーボードを「絶対」に出さないための、時・分ラジオボタン用選択肢
+HOURS_OPTIONS = [f"{h:02d}" for h in range(24)]
+MINUTES_OPTIONS = ["00", "15", "30", "45"]
+
+# 🚨 【新設】絶対キーボードが出ない時間選択UI関数
+def select_time_without_keyboard(label_prefix, default_h="09", default_m="00", key_suffix=""):
+    st.markdown(f"<small style='color:#555;font-weight:bold;'>{label_prefix}</small>", unsafe_allow_html=True)
+    c_h, c_m = st.columns([3, 2])
+    with c_h:
+        h_sel = st.radio("⏳ 時", HOURS_OPTIONS, index=HOURS_OPTIONS.index(default_h), key=f"h_{key_suffix}", label_visibility="collapsed")
+    with c_m:
+        m_sel = st.radio("分", MINUTES_OPTIONS, index=MINUTES_OPTIONS.index(default_m), key=f"m_{key_suffix}", label_visibility="collapsed")
+    return f"{h_sel}:{m_sel}"
 
 def check_overlap(date_str, start_str, end_str, df_check_log, exclude_id=None):
     if df_check_log.empty: return False, None
     df_check = df_check_log.copy()
-    if exclude_id is not None:
-        df_check = df_check[df_check["id"] != exclude_id]
+    if exclude_id is not None: df_check = df_check[df_check["id"] != exclude_id]
     if df_check.empty: return False, None
     
     new_start = pd.to_datetime(f"{date_str} {start_str}")
@@ -171,10 +191,8 @@ def merge_continuous_logs(df_target):
             current_row["End_dt"] = next_row["End_dt"]
             current_row["終了時刻"] = next_row["終了時刻"]
             if current_row["内容"] != next_row["内容"] and next_row["内容"] != "（未入力）":
-                if current_row["内容"] == "（未入力）":
-                    current_row["内容"] = next_row["内容"]
-                else:
-                    current_row["内容"] += f", {next_row['内容']}"
+                if current_row["内容"] == "（未入力）": current_row["内容"] = next_row["内容"]
+                else: current_row["内容"] += f", {next_row['内容']}"
         else:
             merged_rows.append(current_row)
             current_row = next_row
@@ -220,17 +238,9 @@ if not ui_log.empty:
     if not df_day_raw.empty:
         df_day = merge_continuous_logs(df_day_raw)
         df_day["時間（h）"] = (df_day["End_dt"] - df_day["Start_dt"]).dt.total_seconds() / 3600.0
+        df_day["グラフ内文字"] = df_day.apply(lambda r: r["カテゴリ"] if ((r["End_dt"] - r["Start_dt"]).total_seconds() / 60.0) >= 45 else "", axis=1)
         
-        df_day["グラフ内文字"] = df_day.apply(
-            lambda r: r["カテゴリ"] if ((r["End_dt"] - r["Start_dt"]).total_seconds() / 60.0) >= 45 else "",
-            axis=1
-        )
-        
-        fig = px.timeline(
-            df_day, x_start="Start_dt", x_end="End_dt", y="日付", color="カテゴリ", 
-            text="グラフ内文字", hover_name="内容", height=180, color_discrete_map=dynamic_colors
-        )
-        
+        fig = px.timeline(df_day, x_start="Start_dt", x_end="End_dt", y="日付", color="カテゴリ", text="グラフ内文字", hover_name="内容", height=180, color_discrete_map=dynamic_colors)
         fig.update_traces(textposition='inside', insidetextanchor='middle', textfont_size=15, textfont_color="#1C1E21", marker_line_width=0)
         
         annotations = []
@@ -240,20 +250,9 @@ if not ui_log.empty:
                 mid_dt = row["Start_dt"] + (row["End_dt"] - row["Start_dt"]) / 2
                 ay_val = 45 if (i % 2 == 0) else 75
                 display_text = f"<b>{row['カテゴリ']}</b> <span style='font-size:11px; color:#666;'>{row['開始時刻']}~</span>"
-                
-                annotations.append(dict(
-                    x=mid_dt, y=date_str, xref="x", yref="y", text=display_text, showarrow=True,
-                    arrowhead=2, arrowsize=1, arrowwidth=1.2, arrowcolor="#999999", ax=0, ay=ay_val,
-                    font=dict(size=12, color="#1C1E21"), bgcolor="rgba(255, 255, 255, 0.9)",
-                    bordercolor="rgba(0,0,0,0.1)", borderwidth=1, borderpad=3
-                ))
+                annotations.append(dict(x=mid_dt, y=date_str, xref="x", yref="y", text=display_text, showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.2, arrowcolor="#999999", ax=0, ay=ay_val, font=dict(size=12, color="#1C1E21"), bgcolor="rgba(255, 255, 255, 0.9)", bordercolor="rgba(0,0,0,0.1)", borderwidth=1, borderpad=3))
             
-        fig.update_layout(
-            xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True, tickfont=dict(color="#555", size=13, weight="bold")),
-            yaxis=dict(title="", showticklabels=False, fixedrange=True),
-            bargap=0, showlegend=False, dragmode=False, margin=dict(l=10, r=10, t=10, b=85), 
-            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', annotations=annotations 
-        )
+        fig.update_layout(xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True, tickfont=dict(color="#555", size=13, weight="bold")), yaxis=dict(title="", showticklabels=False, fixedrange=True), bargap=0, showlegend=False, dragmode=False, margin=dict(l=10, r=10, t=10, b=85), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', annotations=annotations)
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
         day_total = df_day["時間（h）"].sum()
@@ -296,7 +295,7 @@ mode = st.session_state.app_mode
 # ----------------------------
 if mode == "⏱️ 計測":
     if st.session_state.tracking_start is None:
-        if not st.session_state.categories: st.warning("カテゴリがありません。「🏷️ カテゴリ」から追加してください。")
+        if not st.session_state.categories: st.warning("カテゴリがありません。")
         else:
             rt_cat = st.selectbox("カテゴリを選ぶ", st.session_state.categories, key="rt_cat")
             if st.button("▶️ 今からスタート！", type="primary", use_container_width=True):
@@ -304,7 +303,7 @@ if mode == "⏱️ 計測":
                 st.session_state.tracking_start = get_now_jst() 
                 st.rerun()
     else:
-        st.success(f"⏳ 現在 **{st.session_state.tracking_cat}** を計測中です！\n\n実際の開始: {st.session_state.tracking_start.strftime('%H:%M')}")
+        st.success(f"⏳ {st.session_state.tracking_cat} 計測中\n\n開始: {st.session_state.tracking_start.strftime('%H:%M')}")
         rt_detail = st.text_input("メモ（任意）", key="rt_detail")
         
         if st.button("⏹️ 今終わった！（15分単位で記録）", type="primary", use_container_width=True):
@@ -312,36 +311,30 @@ if mode == "⏱️ 計測":
             start_rounded = round_to_15(st.session_state.tracking_start)
             end_rounded = round_to_15(end_dt)
             if start_rounded == end_rounded: end_rounded += timedelta(minutes=15)
-                
             start_str = start_rounded.strftime('%H:%M')
             end_str = end_rounded.strftime('%H:%M')
             record_date_str = start_rounded.strftime('%Y-%m-%d') 
             
             is_overlap, overlap_cat = check_overlap(record_date_str, start_str, end_str, ui_log)
             if is_overlap:
-                st.error(f"⚠️ 丸められた時間が「{overlap_cat}」と重なっています。手動で追加してください。")
+                st.error(f"⚠️ 「{overlap_cat}」と重なっています。")
                 st.session_state.tracking_cat = None; st.session_state.tracking_start = None
             else:
                 supabase.table("timeline_data").insert({"user_name": user_name, "date": record_date_str, "start_time": start_str, "end_time": end_str, "category": st.session_state.tracking_cat, "detail": rt_detail if rt_detail else "（未入力）"}).execute()
                 st.session_state.tracking_cat = None; st.session_state.tracking_start = None
                 st.session_state.need_reload = True
-                st.success(f"{start_str} 〜 {end_str} で記録しました！")
                 st.rerun()
-                
         if st.button("❌ 計測をキャンセル", use_container_width=True):
             st.session_state.tracking_cat = None; st.session_state.tracking_start = None; st.rerun()
 
 elif mode == "📝 追加":
-    if not st.session_state.categories: st.warning("カテゴリがありません。「🏷️ カテゴリ」から追加してください。")
+    if not st.session_state.categories: st.warning("カテゴリがありません。")
     else:
         category = st.selectbox("カテゴリ", st.session_state.categories, key="man_cat")
         
-        # 🚨【改善】st.time_input から st.selectbox に変更し、キーボードの立ち上がりを完全に阻止
-        col3, col4 = st.columns(2)
-        with col3: 
-            start_str = st.selectbox("開始時刻", TIME_OPTIONS, index=TIME_OPTIONS.index("09:00"), key="man_start")
-        with col4: 
-            end_str = st.selectbox("終了時刻", TIME_OPTIONS, index=TIME_OPTIONS.index("10:00"), key="man_end")
+        # 🚨【絶対キーボードが出ないUI】ラジオボタン方式の2連選択
+        start_str = select_time_without_keyboard("🛫 開始時刻", "09", "00", "add_start")
+        end_str = select_time_without_keyboard("🛬 終了時刻", "10", "00", "add_end")
             
         detail = st.text_input("メモ", key="man_detail")
         
@@ -367,18 +360,15 @@ elif mode == "📝 追加":
                     supabase.table("timeline_data").insert({"user_name": user_name, "date": date_str, "start_time": row["開始時刻"], "end_time": row["終了時刻"], "category": row["カテゴリ"], "detail": row["内容"]}).execute()
                     success_count += 1
             st.session_state.need_reload = True
-            st.success(f"🎉 {success_count}件追加しました！")
             st.rerun()
 
 elif mode == "📊 分析":
     st.markdown("#### 時間の使い方のバランス")
     period = st.selectbox("分析する期間", ["過去7日間", "過去30日間", "全期間", "今日"])
-    
     if not ui_log.empty:
         df_analysis = ui_log.copy()
         df_analysis["Date_obj"] = pd.to_datetime(df_analysis["日付"]).dt.date
         today = get_now_jst().date() 
-        
         if period == "今日": df_filtered_raw = df_analysis[df_analysis["Date_obj"] == today]
         elif period == "過去7日間": df_filtered_raw = df_analysis[df_analysis["Date_obj"] >= (today - timedelta(days=6))]
         elif period == "過去30日間": df_filtered_raw = df_analysis[df_analysis["Date_obj"] >= (today - timedelta(days=29))]
@@ -386,10 +376,8 @@ elif mode == "📊 分析":
             
         if not df_filtered_raw.empty:
             df_list = []
-            for d_str, sub_df in df_filtered_raw.groupby("日付"):
-                df_list.append(merge_continuous_logs(sub_df))
+            for d_str, sub_df in df_filtered_raw.groupby("日付"): df_list.append(merge_continuous_logs(sub_df))
             df_filtered = pd.concat(df_list)
-            
             df_filtered["時間（h）"] = (df_filtered["End_dt"] - df_filtered["Start_dt"]).dt.total_seconds() / 3600.0
             sum_df = df_filtered.groupby("カテゴリ")["時間（h）"].sum().reset_index()
             total_hours = round(sum_df["時間（h）"].sum(), 1)
@@ -400,14 +388,10 @@ elif mode == "📊 分析":
             fig_pie.update_layout(showlegend=False, margin=dict(t=40, b=40, l=40, r=40), height=380, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(size=14))
             st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
             
-            st.markdown(f"<p style='font-size:1.0rem; font-weight:bold; color:#555; margin-bottom:5px;'>📋 「{period}」のカテゴリ別詳細</p>", unsafe_allow_html=True)
             df_table = sum_df.sort_values(by="時間（h）", ascending=False).copy()
             df_table["割合"] = (df_table["時間（h）"] / total_hours * 100).round(1).astype(str) + " %"
             df_table["合計時間"] = df_table["時間（h）"].round(1).astype(str) + " 時間"
-            df_table = df_table[["カテゴリ", "合計時間", "割合"]]
-            st.dataframe(df_table, use_container_width=True, hide_index=True)
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.info(f"💡 「{period}」の合計記録時間は **{total_hours} 時間** です。")
+            st.dataframe(df_table[["カテゴリ", "合計時間", "割合"]], use_container_width=True, hide_index=True)
         else: st.warning("この期間の記録はありません。")
     else: st.write("データがありません。")
 
@@ -415,11 +399,9 @@ elif mode == "📜 編集・削除":
     st.markdown(f"#### {date_str} の記録・編集")
     if not ui_log.empty:
         df_edit_target = ui_log[ui_log["日付"] == date_str].copy()
-        if df_edit_target.empty: 
-            st.write("今日の記録はありません。")
+        if df_edit_target.empty: st.write("今日の記録はありません。")
         else:
             df_edit_target = df_edit_target.sort_values("開始時刻")
-            
             for _, row in df_edit_target.iterrows():
                 is_editing = (st.session_state.editing_log_id == row["id"])
                 st.markdown(f"<div class='list-card'>", unsafe_allow_html=True)
@@ -440,34 +422,29 @@ elif mode == "📜 編集・削除":
                             st.rerun()
                 else:
                     st.markdown("<p style='font-size:0.85rem; color:#f03e3e; font-weight:bold;'>📝 データを編集中...</p>", unsafe_allow_html=True)
-                    
                     edit_cat = st.selectbox("カテゴリ", st.session_state.categories, index=st.session_state.categories.index(row["カテゴリ"]) if row["カテゴリ"] in st.session_state.categories else 0, key=f"ed_cat_{row['id']}")
                     
-                    # 🚨【改善】編集画面の時間入力も st.selectbox に変更してキーボードを排除
-                    col_t1, col_t2 = st.columns(2)
-                    with col_t1: 
-                        new_s_str = st.selectbox("開始時刻", TIME_OPTIONS, index=TIME_OPTIONS.index(row["開始時刻"]) if row["開始時刻"] in TIME_OPTIONS else 0, key=f"ed_start_{row['id']}")
-                    with col_t2: 
-                        new_e_str = st.selectbox("終了時刻", TIME_OPTIONS, index=TIME_OPTIONS.index(row["終了時刻"]) if row["終了時刻"] in TIME_OPTIONS else 0, key=f"ed_end_{row['id']}")
+                    # 🚨【編集画面もキーボード完全ブロック】既存の値を時と分に分解して初期値にする
+                    try:
+                        sh_init, sm_init = row["開始時刻"].split(":")
+                        eh_init, em_init = row["終了時刻"].split(":")
+                    except:
+                        sh_init, sm_init, eh_init, em_init = "09", "00", "10", "00"
+                        
+                    new_s_str = select_time_without_keyboard("🛫 変更後の開始時刻", sh_init, sm_init, f"edit_s_{row['id']}")
+                    new_e_str = select_time_without_keyboard("🛬 変更後の終了時刻", eh_init, em_init, f"edit_e_{row['id']}")
                     
                     edit_detail = st.text_input("メモ内容", value=row["内容"], key=f"ed_det_{row['id']}")
                     
                     cb1, cb2 = st.columns(2)
                     with cb1:
                         if st.button("💾 変更を保存", type="primary", key=f"save_btn_{row['id']}", use_container_width=True):
-                            if new_s_str == new_e_str:
-                                st.error("⚠️ 開始と終了が同じ時刻です。")
+                            if new_s_str == new_e_str: st.error("⚠️ 同じ時刻です。")
                             else:
                                 is_overlap, overlap_cat = check_overlap(date_str, new_s_str, new_e_str, ui_log, exclude_id=row["id"])
-                                if is_overlap:
-                                    st.error(f"⚠️ 変更後の時間が「{overlap_cat}」と重なっています！")
+                                if is_overlap: st.error(f"⚠️ 「{overlap_cat}」と重なっています！")
                                 else:
-                                    supabase.table("timeline_data").update({
-                                        "start_time": new_s_str,
-                                        "end_time": new_e_str,
-                                        "category": edit_cat,
-                                        "detail": edit_detail if edit_detail else "（未入力）"
-                                    }).eq("id", row['id']).execute()
+                                    supabase.table("timeline_data").update({"start_time": new_s_str, "end_time": new_e_str, "category": edit_cat, "detail": edit_detail if edit_detail else "（未入力）"}).eq("id", row['id']).execute()
                                     st.session_state.editing_log_id = None 
                                     st.session_state.need_reload = True
                                     st.rerun()
@@ -475,31 +452,26 @@ elif mode == "📜 編集・削除":
                         if st.button("❌ キャンセル", key=f"cancel_btn_{row['id']}", use_container_width=True):
                             st.session_state.editing_log_id = None
                             st.rerun()
-                            
                 st.markdown("</div>", unsafe_allow_html=True)
     else: st.write("データがありません。")
 
 elif mode == "⚙️ 固定":
     st.markdown("#### 新規追加")
-    if not st.session_state.categories: st.warning("カテゴリがありません。「🏷️ カテゴリ」から追加してください。")
+    if not st.session_state.categories: st.warning("カテゴリがありません。")
     else:
         r_col1, r_col2 = st.columns(2)
         with r_col1: r_day = st.selectbox("曜日", WEEKDAYS)
         with r_col2: r_cat = st.selectbox("カテゴリ", st.session_state.categories)
         
-        # 🚨【改善】固定（ルーティン）追加画面の時間入力も st.selectbox に変更
-        r_col3, r_col4 = st.columns(2)
-        with r_col3: 
-            r_start_str = st.selectbox("開始", TIME_OPTIONS, index=TIME_OPTIONS.index("09:00"), key="r_start")
-        with r_col4: 
-            r_end_str = st.selectbox("終了", TIME_OPTIONS, index=TIME_OPTIONS.index("10:00"), key="r_end")
+        # 🚨【固定追加画面もキーボード完全ブロック】
+        r_start_str = select_time_without_keyboard("🛫 開始", "09", "00", "rt_start")
+        r_end_str = select_time_without_keyboard("🛬 終了", "10", "00", "rt_end")
             
         r_detail = st.text_input("メモ（任意）", key="r_detail")
-        
         if st.button("➕ ルーティンを追加", use_container_width=True):
             supabase.table("timeline_routine").insert({"user_name": user_name, "weekday": r_day, "start_time": r_start_str, "end_time": r_end_str, "category": r_cat, "detail": r_detail if r_detail else "（未入力）"}).execute()
             st.session_state.need_reload = True
-            st.success("追加しました！"); st.rerun()
+            st.rerun()
 
     st.markdown("#### 登録済み一覧")
     if ui_routine.empty: st.write("登録されていません。")
@@ -519,22 +491,15 @@ elif mode == "⚙️ 固定":
 
 elif mode == "🏷️ カテゴリ":
     st.markdown("#### カテゴリの編集")
-    st.info("💡 表の下の「＋」で追加できます。\n⚠️ 編集が終わったら、必ず下の**「保存ボタン」**を押してください。")
-    
     df_cat = pd.DataFrame(st.session_state.categories, columns=["カテゴリ名"])
     edited_df_cat = st.data_editor(df_cat, num_rows="dynamic", use_container_width=True, key="cat_editor")
-    
     if st.button("💾 変更を保存する", type="primary", use_container_width=True):
         new_cats = edited_df_cat["カテゴリ名"].dropna().astype(str).str.strip().tolist()
         new_cats = [c for c in new_cats if c != "" and c != "None"]
         new_cats = list(dict.fromkeys(new_cats)) 
-        
         if len(new_cats) > 0:
             supabase.table("timeline_categories").delete().eq("user_name", user_name).execute()
             inserts = [{"user_name": user_name, "category_name": c} for c in new_cats]
             supabase.table("timeline_categories").insert(inserts).execute()
             st.session_state.need_reload = True
-            st.success("カテゴリを保存しました！")
             st.rerun()
-        else:
-            st.error("⚠️ 最低1つのカテゴリが必要です。")
