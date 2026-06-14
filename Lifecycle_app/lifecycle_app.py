@@ -170,7 +170,7 @@ current_weekday = WEEKDAYS[st.session_state.target_date.weekday()]
 st.markdown(f"<div style='text-align: center; font-size: 0.95rem; font-weight: bold; margin-bottom: 10px;'>{date_str} ({current_weekday})</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 📊 タイムライン・グラフエリア（エラー完全解消版）
+# 📊 タイムライン・グラフエリア（棒グラフ拡大版）
 # ==========================================
 if not ui_log.empty:
     df = ui_log.copy()
@@ -187,29 +187,27 @@ if not ui_log.empty:
         # 開始時刻順に並び替え
         df_day = df_day.sort_values("開始時刻")
         
-        # 🚨【新方式】45分未満の予定は、棒グラフ内の文字をはじめから「空っぽ」にする
-        # これにより、エラーの原因だった constraintext を使わずに文字の非表示を実現します
+        # 45分未満の予定は、棒グラフ内の文字をはじめから「空っぽ」にする
         df_day["グラフ内文字"] = df_day.apply(
             lambda r: r["カテゴリ"] if ((pd.to_datetime(r["日付"] + " " + r["終了時刻"]) - pd.to_datetime(r["日付"] + " " + r["開始時刻"])).total_seconds() / 60.0) >= 45 else "",
             axis=1
         )
         
-        # 横棒グラフの作成（表示文字には上記で作った「グラフ内文字」を指定）
+        # 🚨 修正：heightを 150 から 180 に大きくしました
         fig = px.timeline(
             df_day, x_start="Start_dt", x_end="End_dt", y="日付", color="カテゴリ", 
-            text="グラフ内文字", hover_name="内容", height=150, color_discrete_map=dynamic_colors
+            text="グラフ内文字", hover_name="内容", height=180, color_discrete_map=dynamic_colors
         )
         
-        # 安全な設定のみに絞ってアップデート
         fig.update_traces(
             textposition='inside', 
             insidetextanchor='middle', 
-            textfont_size=14,         # 文字サイズ指定
-            textfont_color="#1C1E21",  # 文字色指定
+            textfont_size=15,         # 🚨 文字サイズも少し大きく（14→15）して見やすくしました
+            textfont_color="#1C1E21",  
             marker_line_width=0
         )
         
-        # 短すぎる項目だけを判定して、引き出し線を伸ばす（こちらは変更なし）
+        # 短すぎる項目だけを判定して、引き出し線を伸ばす
         annotations = []
         for i, (_, row) in enumerate(df_day.iterrows()):
             duration_minutes = (row["End_dt"] - row["Start_dt"]).total_seconds() / 60.0
@@ -218,8 +216,8 @@ if not ui_log.empty:
             if duration_minutes < 45:
                 mid_dt = row["Start_dt"] + (row["End_dt"] - row["Start_dt"]) / 2
                 
-                # 線が被らないように交互に高さを変えて下に伸ばす
-                ay_val = 35 if (i % 2 == 0) else 65
+                # 🚨 グラフが太くなったので、引き出し線の出発点を調整（少し深めに伸ばす）
+                ay_val = 45 if (i % 2 == 0) else 75
                 display_text = f"<b>{row['カテゴリ']}</b> <span style='font-size:11px; color:#666;'>{row['開始時刻']}~</span>"
                 
                 annotations.append(dict(
@@ -244,12 +242,13 @@ if not ui_log.empty:
         fig.update_layout(
             xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True, tickfont=dict(color="#555", size=13, weight="bold")),
             yaxis=dict(title="", showticklabels=False, fixedrange=True),
+            bargap=0, # 🚨 修正：棒の上下の無駄な隙間をゼロにして、限界まで太くします！
             showlegend=False, 
             dragmode=False, 
-            margin=dict(l=10, r=10, t=10, b=75), # 下側の余白をしっかり確保
+            margin=dict(l=10, r=10, t=10, b=85), # 下側の引き出し線用の余白
             plot_bgcolor='rgba(0,0,0,0)', 
             paper_bgcolor='rgba(0,0,0,0)',
-            annotations=annotations # 判定した引き出し線を合体
+            annotations=annotations 
         )
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
