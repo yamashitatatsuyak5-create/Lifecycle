@@ -35,6 +35,24 @@ st.markdown("""
         margin-bottom: 10px;
         border: 1px solid rgba(0, 0, 0, 0.1);
     }
+    
+    /* 時間表示用のスタイリッシュな文字 */
+    .time-display {
+        font-size: 1.5rem;
+        font-weight: bold;
+        text-align: center;
+        background: rgba(0,0,0,0.05);
+        padding: 8px;
+        border-radius: 10px;
+        margin: 5px 0;
+        color: #1C1E21;
+    }
+    @media (prefers-color-scheme: dark) {
+        .time-display {
+            background: rgba(255,255,255,0.1);
+            color: #FFFFFF;
+        }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -107,21 +125,39 @@ if "tracking_cat" not in st.session_state: st.session_state.tracking_cat = None
 if "tracking_start" not in st.session_state: st.session_state.tracking_start = None
 if "editing_log_id" not in st.session_state: st.session_state.editing_log_id = None 
 
-# 🚨 【新設】キーボードが絶対出ず、100%確実に動く「時・分 分離セレクトボックスUI」
-def split_time_selectbox(label, default_h, default_m, key_suffix):
+# 🚨 【新設・決定版】キーボードが100%出ない、高速スマート時間微調整UI
+def keyboard_free_time_picker(label, current_time_str, key_suffix):
     st.markdown(f"<small style='color:#555;font-weight:bold;'>{label}</small>", unsafe_allow_html=True)
     
-    hours_options = [f"{i:02d}" for i in range(24)]
-    minutes_options = ["00", "15", "30", "45"]
-    
-    # 横並びに「時」と「分」を配置
-    c_h, c_m = st.columns(2)
-    with c_h:
-        h_val = st.selectbox("時", hours_options, index=hours_options.index(f"{int(default_h):02d}"), key=f"sel_h_{key_suffix}", label_visibility="collapsed")
-    with c_m:
-        m_val = st.selectbox("分", minutes_options, index=minutes_options.index(f"{int(default_m):02d}") if f"{int(default_m):02d}" in minutes_options else 0, key=f"sel_m_{key_suffix}", label_visibility="collapsed")
+    # 状態の初期化
+    state_key = f"time_val_{key_suffix}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = current_time_str
         
-    return f"{h_val}:{m_val}"
+    t = datetime.strptime(st.session_state[state_key], "%H:%M")
+    
+    # 4つの調整用物理ボタンを横一列にスマートに配置
+    b1, b2, b3, b4 = st.columns(4)
+    with b1:
+        if st.button("ー1h", key=f"m1h_{key_suffix}", use_container_width=True):
+            t -= timedelta(hours=1)
+            st.session_state[state_key] = t.strftime("%H:%M"); st.rerun()
+    with b2:
+        if st.button("ー15m", key=f"m15m_{key_suffix}", use_container_width=True):
+            t -= timedelta(minutes=15)
+            st.session_state[state_key] = t.strftime("%H:%M"); st.rerun()
+    with b3:
+        if st.button("＋15m", key=f"p15m_{key_suffix}", use_container_width=True):
+            t += timedelta(minutes=15)
+            st.session_state[state_key] = t.strftime("%H:%M"); st.rerun()
+    with b4:
+        if st.button("＋1h", key=f"p1h_{key_suffix}", use_container_width=True):
+            t += timedelta(hours=1)
+            st.session_state[state_key] = t.strftime("%H:%M"); st.rerun()
+            
+    # 現在選ばれている時間を大きな文字で表示
+    st.markdown(f"<div class='time-display'>{st.session_state[state_key]}</div>", unsafe_allow_html=True)
+    return st.session_state[state_key]
 
 def check_overlap(date_str, start_str, end_str, df_check_log, exclude_id=None):
     if df_check_log.empty: return False, None
@@ -296,9 +332,9 @@ elif mode == "📝 追加":
     else:
         category = st.selectbox("カテゴリ", st.session_state.categories, key="man_cat")
         
-        # 🚨 【決定版】時と分を分けたセレクトボックス（100%バグらず動き、キーボードも出ない）
-        start_str = split_time_selectbox("🛫 開始時刻", 9, 0, "add_start")
-        end_str = split_time_selectbox("🛬 終了時刻", 10, 0, "add_end")
+        # 🚨 【完全キーボードフリー】1hボタンと15mボタンで爆速調整
+        start_str = keyboard_free_time_picker("🛫 開始時刻", "09:00", "add_start")
+        end_str = keyboard_free_time_picker("🛬 終了時刻", "10:00", "add_end")
             
         detail = st.text_input("メモ", key="man_detail")
         
@@ -309,6 +345,9 @@ elif mode == "📝 追加":
                 if is_overlap: st.error(f"⚠️ すでに「{overlap_cat}」が入っています！")
                 else:
                     supabase.table("timeline_data").insert({"user_name": user_name, "date": date_str, "start_time": start_str, "end_time": end_str, "category": category, "detail": detail if detail else "（未入力）"}).execute()
+                    # 登録後はセッション内の選択用時間状態をリセット
+                    if "time_val_add_start" in st.session_state: del st.session_state["time_val_add_start"]
+                    if "time_val_add_end" in st.session_state: del st.session_state["time_val_add_end"]
                     st.session_state.need_reload = True
                     st.rerun()
 
@@ -388,15 +427,9 @@ elif mode == "📜 編集・削除":
                     st.markdown("<p style='font-size:0.85rem; color:#f03e3e; font-weight:bold;'>📝 データを編集中...</p>", unsafe_allow_html=True)
                     edit_cat = st.selectbox("カテゴリ", st.session_state.categories, index=st.session_state.categories.index(row["カテゴリ"]) if row["カテゴリ"] in st.session_state.categories else 0, key=f"ed_cat_{row['id']}")
                     
-                    # 🚨 編集用の時・分セレクトボックス
-                    try:
-                        sh, sm = map(int, row["開始時刻"].split(":"))
-                        eh, em = map(int, row["終了時刻"].split(":"))
-                    except:
-                        sh, sm, eh, em = 9, 0, 10, 0
-                        
-                    new_s_str = split_time_selectbox("🛫 変更後の開始時刻", sh, sm, f"edit_s_{row['id']}")
-                    new_e_str = split_time_selectbox("🛬 変更後の終了時刻", eh, em, f"edit_e_{row['id']}")
+                    # 🚨 編集用の物理ボタン時間ピッカー
+                    new_s_str = keyboard_free_time_picker("🛫 変更後の開始時刻", row["開始時刻"], f"edit_s_{row['id']}")
+                    new_e_str = keyboard_free_time_picker("🛬 変更後の終了時刻", row["終了時刻"], f"edit_e_{row['id']}")
                     
                     edit_detail = st.text_input("メモ内容", value=row["内容"], key=f"ed_det_{row['id']}")
                     
@@ -409,11 +442,15 @@ elif mode == "📜 編集・削除":
                                 if is_overlap: st.error(f"⚠️ 「{overlap_cat}」と重なっています！")
                                 else:
                                     supabase.table("timeline_data").update({"start_time": new_s_str, "end_time": new_e_str, "category": edit_cat, "detail": edit_detail if edit_detail else "（未入力）"}).eq("id", row['id']).execute()
+                                    if f"time_val_edit_s_{row['id']}" in st.session_state: del st.session_state[f"time_val_edit_s_{row['id']}"]
+                                    if f"time_val_edit_e_{row['id']}" in st.session_state: del st.session_state[f"time_val_edit_e_{row['id']}"]
                                     st.session_state.editing_log_id = None 
                                     st.session_state.need_reload = True
                                     st.rerun()
                     with cb2:
                         if st.button("❌ キャンセル", key=f"cancel_btn_{row['id']}", use_container_width=True):
+                            if f"time_val_edit_s_{row['id']}" in st.session_state: del st.session_state[f"time_val_edit_s_{row['id']}"]
+                            if f"time_val_edit_e_{row['id']}" in st.session_state: del st.session_state[f"time_val_edit_e_{row['id']}"]
                             st.session_state.editing_log_id = None
                             st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
@@ -427,13 +464,15 @@ elif mode == "⚙️ 固定":
         with r_col1: r_day = st.selectbox("曜日", WEEKDAYS)
         with r_col2: r_cat = st.selectbox("カテゴリ", st.session_state.categories)
         
-        # 🚨 ルーティン用の時・分セレクトボックス
-        r_start_str = split_time_selectbox("🛫 開始", 9, 0, "rt_start")
-        r_end_str = split_time_selectbox("🛬 終了", 10, 0, "rt_end")
+        # 🚨 ルーティン用の物理ボタン時間ピッカー
+        r_start_str = keyboard_free_time_picker("🛫 開始", "09:00", "rt_start")
+        r_end_str = keyboard_free_time_picker("🛬 終了", "10:00", "rt_end")
             
         r_detail = st.text_input("メモ（任意）", key="r_detail")
         if st.button("➕ ルーティンを追加", use_container_width=True):
             supabase.table("timeline_routine").insert({"user_name": user_name, "weekday": r_day, "start_time": r_start_str, "end_time": r_end_str, "category": r_cat, "detail": r_detail if r_detail else "（未入力）"}).execute()
+            if "time_val_rt_start" in st.session_state: del st.session_state["time_val_rt_start"]
+            if "time_val_rt_end" in st.session_state: del st.session_state["time_val_rt_end"]
             st.session_state.need_reload = True
             st.rerun()
 
