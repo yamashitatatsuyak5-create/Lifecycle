@@ -170,7 +170,7 @@ current_weekday = WEEKDAYS[st.session_state.target_date.weekday()]
 st.markdown(f"<div style='text-align: center; font-size: 0.95rem; font-weight: bold; margin-bottom: 10px;'>{date_str} ({current_weekday})</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 📊 タイムライン・グラフエリア（引き出し線付きデザイン版）
+# 📊 タイムライン・グラフエリア（復活・下側引き出し線版）
 # ==========================================
 if not ui_log.empty:
     df = ui_log.copy()
@@ -190,54 +190,52 @@ if not ui_log.empty:
         # 横棒グラフの作成（棒の中には文字を入れず、色だけにします）
         fig = px.timeline(
             df_day, x_start="Start_dt", x_end="End_dt", y="日付", color="カテゴリ", 
-            hover_name="内容", height=180, color_discrete_map=dynamic_colors
+            hover_name="内容", height=160, color_discrete_map=dynamic_colors
         )
         
         fig.update_traces(marker_line_width=0)
         
-        # 🚨【新設】引き出し線の配置ロジック
-        # 予定ごとに「上」「下」交互に線を伸ばして、文字が重なるのを防ぎます
+        # 🚨 引き出し線の配置ロジック（タイムラインの文字座標に対応）
         annotations = []
         for i, (_, row) in enumerate(df_day.iterrows()):
-            # 予定の真ん中の時間を計算して、そこから線を伸ばす
+            # 予定の真ん中の時間を計算
             mid_dt = row["Start_dt"] + (row["End_dt"] - row["Start_dt"]) / 2
             
-            # 偶数番目は上側、奇数番目は下側に引き出し線を伸ばす
-            is_top = (i % 2 == 0)
-            y_text = 0.8 if is_top else -0.8  # 文字を置く上下の位置
-            ay_val = -35 if is_top else 35    # 線の長さと方向
+            # 交互に高さを変えて、下側にジグザグに線を伸ばす（文字の重なり防止）
+            # 偶数番目は少し浅め、奇数番目は少し深めに下に伸ばします
+            ay_val = 30 if (i % 2 == 0) else 65
             
             # 表示する文字（カテゴリ名と開始時間）
             display_text = f"<b>{row['カテゴリ']}</b><br><span style='font-size:11px; color:#666;'>{row['開始時刻']}~</span>"
             
             annotations.append(dict(
                 x=mid_dt,                          # 線の出発点（時間軸）
-                y=0,                               # 線の出発点（グラフの高さ中心）
+                y=date_str,                        # 🚨 線の出発点（日付文字列を指定することでグラフ消失を解決！）
                 xref="x", yref="y",
                 text=display_text,                 # 表示するテキスト
                 showarrow=True,                    # 引き出し線を表示する
-                arrowhead=2,                       # 線の矢印の形（2はシンプルな矢印）
+                arrowhead=2,                       # 線の矢印の形
                 arrowsize=1,
-                arrowwidth=1.5,
-                arrowcolor="#888888",              # 引き出し線の色
-                ax=0,                              # 左右のズレ（真上に伸ばす）
-                ay=ay_val,                         # 上下の線の長さ
-                font=dict(size=13, color="#1C1E21"), # 文字の大きさ
-                bgcolor="rgba(255, 255, 255, 0.85)", # 文字の背景を少し白くして見やすく
+                arrowwidth=1.2,
+                arrowcolor="#999999",              # 引き出し線の色
+                ax=0,                              # 真下に真っ直ぐ伸ばす
+                ay=ay_val,                         # 下方向への線の長さ
+                font=dict(size=12, color="#1C1E21"), # 文字の大きさ
+                bgcolor="rgba(255, 255, 255, 0.9)", # 背景を白くして文字を読みやすく
                 bordercolor="rgba(0,0,0,0.1)",
                 borderwidth=1,
-                borderpad=4
+                borderpad=3
             ))
             
         fig.update_layout(
             xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True, tickfont=dict(color="#555", size=13, weight="bold")),
-            yaxis=dict(title="", showticklabels=False, range=[-1.5, 1.5], fixedrange=True), # 引き出し線が見えるように上下の幅を広げる
+            yaxis=dict(title="", showticklabels=False, fixedrange=True),
             showlegend=False, 
             dragmode=False, 
-            margin=dict(l=10, r=10, t=40, b=40), # 上下の余白を確保
+            margin=dict(l=10, r=10, t=10, b=80), # 🚨 下側に文字が出るので、下の余白（b）を大きく確保
             plot_bgcolor='rgba(0,0,0,0)', 
             paper_bgcolor='rgba(0,0,0,0)',
-            annotations=annotations # 作成した引き出し線をグラフに合体
+            annotations=annotations              # 引き出し線を合体
         )
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
