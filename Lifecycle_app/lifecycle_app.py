@@ -170,7 +170,7 @@ current_weekday = WEEKDAYS[st.session_state.target_date.weekday()]
 st.markdown(f"<div style='text-align: center; font-size: 0.95rem; font-weight: bold; margin-bottom: 10px;'>{date_str} ({current_weekday})</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 📊 タイムライン・グラフエリア（最新修正版）
+# 📊 タイムライン・グラフエリア（重なり解消決定版）
 # ==========================================
 if not ui_log.empty:
     df = ui_log.copy()
@@ -184,36 +184,52 @@ if not ui_log.empty:
     end_of_day = start_of_day + pd.Timedelta(days=1)
     
     if not df_day.empty:
-        # 🚨 グラフに表示する文字を「カテゴリ ＋ 内容（メモ）」のセットに変更
-        df_day["表示文字"] = df_day["カテゴリ"] + " (" + df_day["内容"] + ")"
+        # 開始時刻順に並び替え
+        df_day = df_day.sort_values("開始時刻")
         
+        # 1. 横棒グラフの作成（文字はカテゴリ名のみ、はみ出させない）
         fig = px.timeline(
             df_day, x_start="Start_dt", x_end="End_dt", y="日付", color="カテゴリ", 
-            text="表示文字", hover_name="内容", height=150, color_discrete_map=dynamic_colors
+            text="カテゴリ", hover_name="内容", height=100, color_discrete_map=dynamic_colors
         )
         
-        # 🚨 textposition を 'auto' にして、幅が狭いときは文字を外側（上下）に逃がすように設定
+        # 文字を『絶対に棒の内側』に収め、幅が狭くて入り切らない場合は自動で隠す（重なりを防ぐ）
         fig.update_traces(
-            textposition='auto', 
+            textposition='inside', 
             insidetextanchor='middle', 
             textfont_color="#1C1E21", 
             marker_line_width=0
         )
         
-        # 🚨 全体の文字サイズを「15px」に大きく固定！
         fig.update_layout(
-            xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True, tickfont=dict(color="#555", size=14, weight="bold")),
+            xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True, tickfont=dict(color="#555", size=13, weight="bold")),
             yaxis=dict(title="", showticklabels=False, fixedrange=True),
             showlegend=False, 
             dragmode=False, 
             margin=dict(l=5, r=5, t=10, b=10), 
             plot_bgcolor='rgba(0,0,0,0)', 
             paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(size=15) # ← ここでグラフ全体の文字を大きく指定しています
+            font=dict(size=13)
         )
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
+        # 2. 🚨【新設】短い時間でも100%文字が読める「今日のタイムライン詳細リスト」
+        st.markdown("<p style='font-size:0.9rem; font-weight:bold; color:#555; margin-bottom:5px;'>📋 今日のスケジュール詳細</p>", unsafe_allow_html=True)
+        
+        for _, row in df_day.iterrows():
+            # カテゴリごとの色を左側に小さな丸（●）として表示して見やすくする
+            cat_color = dynamic_colors.get(row['カテゴリ'], "#CCC")
+            st.markdown(
+                f"<div style='display:flex; align-items:center; font-size:0.95rem; margin-bottom:6px; padding:4px 8px; background:rgba(0,0,0,0.02); border-radius:8px;'>"
+                f"<span style='color:{cat_color}; margin-right:8px; font-size:1.2rem;'>●</span>"
+                f"<b style='min-width:95px; color:#333;'>{row['開始時刻']}〜{row['終了時刻']}</b>"
+                f"<span style='margin-left:5px; color:#1C1E21;'><b>{row['カテゴリ']}</b> <span style='color:#666; font-size:0.85rem;'>({row['内容']})</span></span>"
+                f"</div>", 
+                unsafe_allow_html=True
+            )
+            
         day_total = df_day["時間（h）"].sum()
+        st.markdown("<br>", unsafe_allow_html=True)
         st.info(f"✨ 記録済み: {round(day_total, 1)} 時間 （空き: {round(24.0 - day_total, 1)} 時間）")
     else:
         empty_df = pd.DataFrame({"日付": [date_str], "Start_dt": [start_of_day], "End_dt": [start_of_day], "カテゴリ": ["未記録"]})
@@ -222,7 +238,6 @@ if not ui_log.empty:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 else:
     st.info("まずは下のメニューから記録を追加してみましょう！ 🎈")
-
 st.markdown("---")
 
 # ==========================================
