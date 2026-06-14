@@ -13,8 +13,8 @@ st.set_page_config(page_title="ライフログ", layout="wide", initial_sidebar_
 # ==========================================
 # 🚨 以下の2行の "" の中に、取得したURLと鍵を貼り付けてください！🚨
 
-SUPABASE_URL = "ここにProject URLを貼り付ける"
-SUPABASE_KEY = "ここにProject API keysのanonを貼り付ける"
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
 # Supabaseに接続
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
