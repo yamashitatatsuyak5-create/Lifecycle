@@ -80,23 +80,20 @@ if st.session_state.current_user is None:
             if len(res.data) > 0:
                 st.error("⚠️ その名前はすでに誰かに使われています。")
             elif signup_name and signup_pass:
-                # ユーザーを登録
                 supabase.table("users").insert({"user_name": signup_name, "password": hash_password(signup_pass)}).execute()
-                # デフォルトのカテゴリを登録
                 default_cats = ["睡眠 🛌", "大学（講義・研究） 📝", "自主学習 ✏️", "バイト 💼", "移動・通学 🚶", "趣味・娯楽 🎮", "食事・生活 🍳", "その他 💬"]
                 cat_inserts = [{"user_name": signup_name, "category_name": c} for c in default_cats]
                 supabase.table("timeline_categories").insert(cat_inserts).execute()
                 st.success("🎉 アカウントが完成しました！左のタブからログインしてください。")
             else:
                 st.warning("ユーザー名とパスワードを入力してください。")
-    st.stop() # ログインしていない場合はここで画面を止める
+    st.stop()
 
 # ==========================================
 # 🚀 ログイン成功後（メインアプリ）
 # ==========================================
 user_name = st.session_state.current_user
 
-# --- データベースから読み込む関数 ---
 def load_db_data():
     res_cats = supabase.table("timeline_categories").select("category_name").eq("user_name", user_name).execute()
     st.session_state.categories = [row["category_name"] for row in res_cats.data] if res_cats.data else ["未設定"]
@@ -111,7 +108,6 @@ def load_db_data():
     
     st.session_state.need_reload = False
 
-# 最新のデータを読み込む
 if "need_reload" not in st.session_state or st.session_state.need_reload:
     load_db_data()
 
@@ -119,18 +115,21 @@ ui_log = st.session_state.ui_log
 ui_routine = st.session_state.ui_routine
 dynamic_colors = {cat: PASTEL_PALETTE[i % len(PASTEL_PALETTE)] for i, cat in enumerate(st.session_state.categories)}
 
-# サーバー時間（UTC）によるリアルタイム計測のズレを防ぐため、日本時間（JST）を取得する関数
 def get_now_jst():
     return datetime.utcnow() + timedelta(hours=9)
 
-# アプリ状態の初期化
 if "target_date" not in st.session_state: st.session_state.target_date = get_now_jst().date()
 if "app_mode" not in st.session_state: st.session_state.app_mode = "⏱️ 計測"
 if "tracking_cat" not in st.session_state: st.session_state.tracking_cat = None
 if "tracking_start" not in st.session_state: st.session_state.tracking_start = None
 if "editing_log_id" not in st.session_state: st.session_state.editing_log_id = None 
 
-# 重複チェック
+# 🚨【新設】キーボードを出さないための「15分単位」の時間選択肢リストを生成 (00:00 〜 23:45)
+TIME_OPTIONS = []
+for h in range(24):
+    for m in [0, 15, 30, 45]:
+        TIME_OPTIONS.append(f"{h:02d}:{m:02d}")
+
 def check_overlap(date_str, start_str, end_str, df_check_log, exclude_id=None):
     if df_check_log.empty: return False, None
     df_check = df_check_log.copy()
@@ -155,11 +154,8 @@ def round_to_15(dt):
     if discard >= timedelta(minutes=7, seconds=30): dt += timedelta(minutes=15)
     return dt
 
-# 🚨【新設】同じカテゴリの連続する予定を1つに統合する関数
 def merge_continuous_logs(df_target):
     if df_target.empty: return df_target
-    
-    # 開始日時と終了日時を作成してソート
     df_m = df_target.copy()
     df_m["Start_dt"] = pd.to_datetime(df_m["日付"] + " " + df_m["開始時刻"])
     df_m["End_dt"] = pd.to_datetime(df_m["日付"] + " " + df_m["終了時刻"])
@@ -171,12 +167,9 @@ def merge_continuous_logs(df_target):
     
     for i in range(1, len(df_m)):
         next_row = df_m.iloc[i].to_dict()
-        
-        # 1つ前の「終了日時」と次の「開始日時」がピッタリ同じ、かつ同じカテゴリの場合
         if current_row["End_dt"] == next_row["Start_dt"] and current_row["カテゴリ"] == next_row["カテゴリ"]:
             current_row["End_dt"] = next_row["End_dt"]
             current_row["終了時刻"] = next_row["終了時刻"]
-            # メモ内容も結合する（同じならそのまま、違うならカンマ区切り）
             if current_row["内容"] != next_row["内容"] and next_row["内容"] != "（未入力）":
                 if current_row["内容"] == "（未入力）":
                     current_row["内容"] = next_row["内容"]
@@ -215,7 +208,7 @@ current_weekday = WEEKDAYS[st.session_state.target_date.weekday()]
 st.markdown(f"<div style='text-align: center; font-size: 0.95rem; font-weight: bold; margin-bottom: 10px;'>{date_str} ({current_weekday})</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 📊 タイムライン・グラフエリア（自動マージ対応版）
+# 📊 タイムライン・グラフエリア
 # ==========================================
 if not ui_log.empty:
     df_raw = ui_log.copy()
@@ -225,36 +218,24 @@ if not ui_log.empty:
     end_of_day = start_of_day + pd.Timedelta(days=1)
     
     if not df_day_raw.empty:
-        # 🚨【核心】ここで同じカテゴリが連続していたら合体させる！
         df_day = merge_continuous_logs(df_day_raw)
-        
         df_day["時間（h）"] = (df_day["End_dt"] - df_day["Start_dt"]).dt.total_seconds() / 3600.0
         
-        # 45分未満の短い予定は、あらかじめ中の文字を空にする
         df_day["グラフ内文字"] = df_day.apply(
             lambda r: r["カテゴリ"] if ((r["End_dt"] - r["Start_dt"]).total_seconds() / 60.0) >= 45 else "",
             axis=1
         )
         
-        # 太く大きく表示するため height=180 に拡大
         fig = px.timeline(
             df_day, x_start="Start_dt", x_end="End_dt", y="日付", color="カテゴリ", 
             text="グラフ内文字", hover_name="内容", height=180, color_discrete_map=dynamic_colors
         )
         
-        fig.update_traces(
-            textposition='inside', 
-            insidetextanchor='middle', 
-            textfont_size=15,         
-            textfont_color="#1C1E21",  
-            marker_line_width=0
-        )
+        fig.update_traces(textposition='inside', insidetextanchor='middle', textfont_size=15, textfont_color="#1C1E21", marker_line_width=0)
         
-        # 引き出し線の処理
         annotations = []
         for i, (_, row) in enumerate(df_day.iterrows()):
             duration_minutes = (row["End_dt"] - row["Start_dt"]).total_seconds() / 60.0
-            
             if duration_minutes < 45:
                 mid_dt = row["Start_dt"] + (row["End_dt"] - row["Start_dt"]) / 2
                 ay_val = 45 if (i % 2 == 0) else 75
@@ -270,13 +251,8 @@ if not ui_log.empty:
         fig.update_layout(
             xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True, tickfont=dict(color="#555", size=13, weight="bold")),
             yaxis=dict(title="", showticklabels=False, fixedrange=True),
-            bargap=0, 
-            showlegend=False, 
-            dragmode=False, 
-            margin=dict(l=10, r=10, t=10, b=85), 
-            plot_bgcolor='rgba(0,0,0,0)', 
-            paper_bgcolor='rgba(0,0,0,0)',
-            annotations=annotations 
+            bargap=0, showlegend=False, dragmode=False, margin=dict(l=10, r=10, t=10, b=85), 
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', annotations=annotations 
         )
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
@@ -359,14 +335,17 @@ elif mode == "📝 追加":
     if not st.session_state.categories: st.warning("カテゴリがありません。「🏷️ カテゴリ」から追加してください。")
     else:
         category = st.selectbox("カテゴリ", st.session_state.categories, key="man_cat")
+        
+        # 🚨【改善】st.time_input から st.selectbox に変更し、キーボードの立ち上がりを完全に阻止
         col3, col4 = st.columns(2)
-        with col3: start_time = st.time_input("開始", time(9, 0))
-        with col4: end_time = st.time_input("終了", time(10, 0))
+        with col3: 
+            start_str = st.selectbox("開始時刻", TIME_OPTIONS, index=TIME_OPTIONS.index("09:00"), key="man_start")
+        with col4: 
+            end_str = st.selectbox("終了時刻", TIME_OPTIONS, index=TIME_OPTIONS.index("10:00"), key="man_end")
+            
         detail = st.text_input("メモ", key="man_detail")
         
         if st.button("手動で追加する", use_container_width=True):
-            start_str = start_time.strftime("%H:%M")
-            end_str = end_time.strftime("%H:%M")
             if start_str == end_str: st.warning("開始と終了が同じです。")
             else:
                 is_overlap, overlap_cat = check_overlap(date_str, start_str, end_str, ui_log)
@@ -406,14 +385,12 @@ elif mode == "📊 分析":
         else: df_filtered_raw = df_analysis
             
         if not df_filtered_raw.empty:
-            # 🚨【分析用マージ】分析画面でも、日付ごとに連続するデータをマージしてから集計する
             df_list = []
             for d_str, sub_df in df_filtered_raw.groupby("日付"):
                 df_list.append(merge_continuous_logs(sub_df))
             df_filtered = pd.concat(df_list)
             
             df_filtered["時間（h）"] = (df_filtered["End_dt"] - df_filtered["Start_dt"]).dt.total_seconds() / 3600.0
-
             sum_df = df_filtered.groupby("カテゴリ")["時間（h）"].sum().reset_index()
             total_hours = round(sum_df["時間（h）"].sum(), 1)
             
@@ -421,7 +398,6 @@ elif mode == "📊 分析":
             fig_pie.update_traces(textinfo='percent+label', textposition='outside', marker_line_width=0)
             fig_pie.add_annotation(text=f"<b>計 {total_hours}h</b>", x=0.5, y=0.5, font_size=18, showarrow=False)
             fig_pie.update_layout(showlegend=False, margin=dict(t=40, b=40, l=40, r=40), height=380, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(size=14))
-            
             st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
             
             st.markdown(f"<p style='font-size:1.0rem; font-weight:bold; color:#555; margin-bottom:5px;'>📋 「{period}」のカテゴリ別詳細</p>", unsafe_allow_html=True)
@@ -431,7 +407,6 @@ elif mode == "📊 分析":
             df_table = df_table[["カテゴリ", "合計時間", "割合"]]
             st.dataframe(df_table, use_container_width=True, hide_index=True)
             st.markdown("<br>", unsafe_allow_html=True)
-            
             st.info(f"💡 「{period}」の合計記録時間は **{total_hours} 時間** です。")
         else: st.warning("この期間の記録はありません。")
     else: st.write("データがありません。")
@@ -443,12 +418,10 @@ elif mode == "📜 編集・削除":
         if df_edit_target.empty: 
             st.write("今日の記録はありません。")
         else:
-            # 💡 編集・削除では元のバラバラのデータ（id単位）で表示させる（そうしないと個別に消せなくなるため）
             df_edit_target = df_edit_target.sort_values("開始時刻")
             
             for _, row in df_edit_target.iterrows():
                 is_editing = (st.session_state.editing_log_id == row["id"])
-                
                 st.markdown(f"<div class='list-card'>", unsafe_allow_html=True)
                 
                 if not is_editing:
@@ -468,29 +441,20 @@ elif mode == "📜 編集・削除":
                 else:
                     st.markdown("<p style='font-size:0.85rem; color:#f03e3e; font-weight:bold;'>📝 データを編集中...</p>", unsafe_allow_html=True)
                     
-                    try:
-                        sh, sm = map(int, row["開始時刻"].split(":"))
-                        eh, em = map(int, row["終了時刻"].split(":"))
-                        init_start = time(sh, sm)
-                        init_end = time(eh, em)
-                    except:
-                        init_start = time(9, 0)
-                        init_end = time(10, 0)
-                    
                     edit_cat = st.selectbox("カテゴリ", st.session_state.categories, index=st.session_state.categories.index(row["カテゴリ"]) if row["カテゴリ"] in st.session_state.categories else 0, key=f"ed_cat_{row['id']}")
                     
-                    col_t1, col_t2 = columns = st.columns(2)
-                    with col_t1: edit_start = st.time_input("開始時刻", init_start, key=f"ed_start_{row['id']}")
-                    with col_t2: edit_end = st.time_input("終了時刻", init_end, key=f"ed_end_{row['id']}")
+                    # 🚨【改善】編集画面の時間入力も st.selectbox に変更してキーボードを排除
+                    col_t1, col_t2 = st.columns(2)
+                    with col_t1: 
+                        new_s_str = st.selectbox("開始時刻", TIME_OPTIONS, index=TIME_OPTIONS.index(row["開始時刻"]) if row["開始時刻"] in TIME_OPTIONS else 0, key=f"ed_start_{row['id']}")
+                    with col_t2: 
+                        new_e_str = st.selectbox("終了時刻", TIME_OPTIONS, index=TIME_OPTIONS.index(row["終了時刻"]) if row["終了時刻"] in TIME_OPTIONS else 0, key=f"ed_end_{row['id']}")
                     
                     edit_detail = st.text_input("メモ内容", value=row["内容"], key=f"ed_det_{row['id']}")
                     
                     cb1, cb2 = st.columns(2)
                     with cb1:
                         if st.button("💾 変更を保存", type="primary", key=f"save_btn_{row['id']}", use_container_width=True):
-                            new_s_str = edit_start.strftime("%H:%M")
-                            new_e_str = edit_end.strftime("%H:%M")
-                            
                             if new_s_str == new_e_str:
                                 st.error("⚠️ 開始と終了が同じ時刻です。")
                             else:
@@ -504,7 +468,6 @@ elif mode == "📜 編集・削除":
                                         "category": edit_cat,
                                         "detail": edit_detail if edit_detail else "（未入力）"
                                     }).eq("id", row['id']).execute()
-                                    
                                     st.session_state.editing_log_id = None 
                                     st.session_state.need_reload = True
                                     st.rerun()
@@ -523,13 +486,18 @@ elif mode == "⚙️ 固定":
         r_col1, r_col2 = st.columns(2)
         with r_col1: r_day = st.selectbox("曜日", WEEKDAYS)
         with r_col2: r_cat = st.selectbox("カテゴリ", st.session_state.categories)
+        
+        # 🚨【改善】固定（ルーティン）追加画面の時間入力も st.selectbox に変更
         r_col3, r_col4 = st.columns(2)
-        with r_col3: r_start = st.time_input("開始", time(9,0), key="r_start")
-        with r_col4: r_end = st.time_input("終了", time(10,0), key="r_end")
+        with r_col3: 
+            r_start_str = st.selectbox("開始", TIME_OPTIONS, index=TIME_OPTIONS.index("09:00"), key="r_start")
+        with r_col4: 
+            r_end_str = st.selectbox("終了", TIME_OPTIONS, index=TIME_OPTIONS.index("10:00"), key="r_end")
+            
         r_detail = st.text_input("メモ（任意）", key="r_detail")
         
         if st.button("➕ ルーティンを追加", use_container_width=True):
-            supabase.table("timeline_routine").insert({"user_name": user_name, "weekday": r_day, "start_time": r_start.strftime("%H:%M"), "end_time": r_end.strftime("%H:%M"), "category": r_cat, "detail": r_detail if r_detail else "（未入力）"}).execute()
+            supabase.table("timeline_routine").insert({"user_name": user_name, "weekday": r_day, "start_time": r_start_str, "end_time": r_end_str, "category": r_cat, "detail": r_detail if r_detail else "（未入力）"}).execute()
             st.session_state.need_reload = True
             st.success("追加しました！"); st.rerun()
 
