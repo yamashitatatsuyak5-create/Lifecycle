@@ -32,112 +32,105 @@ div.stButton>button{border-radius:12px!important;font-weight:bold!important;}
     padding:15px;border-radius:15px;margin-bottom:10px;
     border:1px solid rgba(0,0,0,.1);
 }
-/* ▼▼ 追加：selectbox 内 input を完全にタップ不可にする ▼▼ */
-div[data-testid^="stSelect"] input,
-div[data-testid^="stDateInput"] input,
-div[data-testid^="stTimeInput"] input{
-    pointer-events:none!important;      /* タップ出来ない = フォーカス出来ない */
-    caret-color:transparent!important;  /* キャレットも非表示 */
-}
+
+/* ============================================ */
+/* selectbox / date_input / time_input の */
+/* キーボード非表示 CSS */
+/* ============================================ */
+
+/* フォーカス前：pointer-events:none でタップ反応を遅延 */
 div[data-testid^="stSelect"] input,
 div[data-testid^="stDateInput"] input,
 div[data-testid^="stTimeInput"] input {
     pointer-events: none !important;
     -webkit-user-select: none !important;
     user-select: none !important;
-    outline: none !important;
-    -webkit-appearance: none !important;
-    appearance: none !important;
 }
 
-/* iOS Safari 特有対策：タップハイライトを消す */
-div[data-testid^="stSelect"],
-div[data-testid^="stDateInput"],
-div[data-testid^="stTimeInput"] {
-    -webkit-tap-highlight-color: transparent !important;
-}
-/* キーボードが出ても見えないよう画面外に押し出す */
-@media (max-width: 768px) {
-    .ReactVirtualized__Grid input,
-    input[type="text"]:focus {
-        position: fixed !important;
-        left: -9999px !important;
-        top: -9999px !important;
-        opacity: 0 !important;
-    }
-    
-    /* iOS Safari 特有：VirtualKeyboard API が起動しても画面に出ない */
-    input {
-        font-size: 16px !important;  /* iOS は 16px 未満だと zoom するのでこれを逆利用 */
-    }
-}
-
-/* Streamlit selectbox の input を徹底的に消す */
+/* フォーカス時：キーボード画面を画面外に隠す */
 div[data-testid^="stSelect"] input:focus,
 div[data-testid^="stDateInput"] input:focus,
 div[data-testid^="stTimeInput"] input:focus {
-    position: absolute !important;
+    position: fixed !important;
     left: -10000px !important;
+    top: -10000px !important;
     opacity: 0 !important;
+    clip-path: inset(9999px) !important;
     pointer-events: none !important;
+    caret-color: transparent !important;
+}
+
+/* iOS Safari 特有：VirtualKeyboard が起動しても見えない */
+@supports (-webkit-touch-callout: none) {
+    input {
+        font-size: 16px !important;
+        position: absolute !important;
+        left: -10000px !important;
+    }
+}
+
+/* Android Chrome：キーボード領域を画面外に */
+@media (max-width: 768px) {
+    input[type="text"]:focus {
+        position: fixed !important;
+        bottom: -10000px !important;
+        left: -10000px !important;
+    }
+}
+
+/* iPhone notch 対応：safe-area を無視してキーボードを隠す */
+@supports (padding: max(0px)) {
+    div[data-testid^="stSelect"] input,
+    div[data-testid^="stDateInput"] input,
+    div[data-testid^="stTimeInput"] input {
+        bottom: -10000px !important;
+    }
 }
 </style>
 
 <script>
+/* 念押し：フォーカスが当たったら即座に blur + click でドロップダウンを開く */
 (function(){
-
-  // "常時フォーカスを剥がす"パトロール
-  function killFocusOnSelectInputs(){
-    setInterval(()=>{
-      const active = document.activeElement;
-      if(!active) return;
-
-      // 対象は selectbox / date / time の input
-      const isTarget = 
-        active.closest('div[data-testid^="stSelect"]')    ||
-        active.closest('div[data-testid^="stDateInput"]') ||
-        active.closest('div[data-testid^="stTimeInput"]');
-
-      if(isTarget && active.tagName==='INPUT'){
-        // フォーカスが当たった input を即座に blur
-        active.blur();
-        
-        // ドロップダウンを開く
-        const box = isTarget;
-        box.click();
-      }
-    }, 50);  // 50ms ごとにチェック
-  }
-
-  // タップ時に即座に反応
-  function interceptTaps(){
-    const q = `
-      div[data-testid^="stSelect"],
-      div[data-testid^="stDateInput"],
-      div[data-testid^="stTimeInput"]`;
     
-    document.addEventListener('touchstart',(e)=>{
-      const target = e.target.closest(q);
-      if(target){
-        e.preventDefault();
-        // 子の input をすべて blur
-        target.querySelectorAll('input').forEach(inp=>inp.blur());
-        // ドロップダウン開く
-        target.click();
-      }
-    }, {capture:true, passive:false});
-  }
-
-  killFocusOnSelectInputs();
-  interceptTaps();
-
+    // フォーカス監視
+    const killFocus = () => {
+        setInterval(() => {
+            const active = document.activeElement;
+            if (!active || active.tagName !== 'INPUT') return;
+            
+            const isTarget = 
+                active.closest('div[data-testid^="stSelect"]')    ||
+                active.closest('div[data-testid^="stDateInput"]') ||
+                active.closest('div[data-testid^="stTimeInput"]');
+            
+            if (isTarget) {
+                active.blur();
+                isTarget.click();
+            }
+        }, 50);
+    };
+    
+    // タップ時の処理
+    const interceptTaps = () => {
+        const q = `
+            div[data-testid^="stSelect"],
+            div[data-testid^="stDateInput"],
+            div[data-testid^="stTimeInput"]`;
+        
+        document.addEventListener('touchstart', (e) => {
+            const target = e.target.closest(q);
+            if (target) {
+                e.preventDefault();
+                target.querySelectorAll('input').forEach(inp => inp.blur());
+                target.click();
+            }
+        }, { capture: true, passive: false });
+    };
+    
+    // 実行
+    killFocus();
+    interceptTaps();
 })();
-document.addEventListener('focus', (e) => {
-    if (e.target.tagName === 'INPUT') {
-        e.target.setAttribute('readonly', 'true');
-        setTimeout(() => e.target.blur(), 0);
-    }
-}, true);
 </script>
 """, unsafe_allow_html=True)
 
