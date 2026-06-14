@@ -170,7 +170,7 @@ current_weekday = WEEKDAYS[st.session_state.target_date.weekday()]
 st.markdown(f"<div style='text-align: center; font-size: 0.95rem; font-weight: bold; margin-bottom: 10px;'>{date_str} ({current_weekday})</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 📊 タイムライン・グラフエリア
+# 📊 タイムライン・グラフエリア（最新修正版）
 # ==========================================
 if not ui_log.empty:
     df = ui_log.copy()
@@ -184,17 +184,32 @@ if not ui_log.empty:
     end_of_day = start_of_day + pd.Timedelta(days=1)
     
     if not df_day.empty:
+        # 🚨 グラフに表示する文字を「カテゴリ ＋ 内容（メモ）」のセットに変更
+        df_day["表示文字"] = df_day["カテゴリ"] + " (" + df_day["内容"] + ")"
+        
         fig = px.timeline(
             df_day, x_start="Start_dt", x_end="End_dt", y="日付", color="カテゴリ", 
-            text="カテゴリ", hover_name="内容", height=130, color_discrete_map=dynamic_colors
+            text="表示文字", hover_name="内容", height=150, color_discrete_map=dynamic_colors
         )
-        fig.update_traces(textposition='inside', insidetextanchor='middle', textfont_color="#333", marker_line_width=0)
-        # 💡 横棒グラフ（タイムライン）の文字サイズもここで「13px」に大きく固定して読みやすくしました
+        
+        # 🚨 textposition を 'auto' にして、幅が狭いときは文字を外側（上下）に逃がすように設定
+        fig.update_traces(
+            textposition='auto', 
+            insidetextanchor='middle', 
+            textfont_color="#1C1E21", 
+            marker_line_width=0
+        )
+        
+        # 🚨 全体の文字サイズを「15px」に大きく固定！
         fig.update_layout(
-            xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True, tickfont=dict(color="#555", weight="bold")),
+            xaxis=dict(tickformat="%H:%M", title="", range=[start_of_day, end_of_day], dtick=14400000, fixedrange=True, tickfont=dict(color="#555", size=14, weight="bold")),
             yaxis=dict(title="", showticklabels=False, fixedrange=True),
-            showlegend=False, dragmode=False, margin=dict(l=0, r=0, t=0, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(size=13)
+            showlegend=False, 
+            dragmode=False, 
+            margin=dict(l=5, r=5, t=10, b=10), 
+            plot_bgcolor='rgba(0,0,0,0)', 
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(size=15) # ← ここでグラフ全体の文字を大きく指定しています
         )
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
