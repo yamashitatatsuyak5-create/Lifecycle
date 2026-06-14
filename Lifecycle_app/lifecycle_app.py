@@ -132,6 +132,12 @@ div[data-testid^="stTimeInput"] input:focus {
   interceptTaps();
 
 })();
+document.addEventListener('focus', (e) => {
+    if (e.target.tagName === 'INPUT') {
+        e.target.setAttribute('readonly', 'true');
+        setTimeout(() => e.target.blur(), 0);
+    }
+}, true);
 </script>
 """, unsafe_allow_html=True)
 
