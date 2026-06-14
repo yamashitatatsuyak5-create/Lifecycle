@@ -170,7 +170,7 @@ current_weekday = WEEKDAYS[st.session_state.target_date.weekday()]
 st.markdown(f"<div style='text-align: center; font-size: 0.95rem; font-weight: bold; margin-bottom: 10px;'>{date_str} ({current_weekday})</div>", unsafe_allow_html=True)
 
 # ==========================================
-# 📊 タイムライン・グラフエリア（入り切らない時だけ引き出し線版）
+# 📊 タイムライン・グラフエリア（入り切らない時だけ引き出し線・エラー修正版）
 # ==========================================
 if not ui_log.empty:
     df = ui_log.copy()
@@ -193,17 +193,17 @@ if not ui_log.empty:
             text="カテゴリ", hover_name="内容", height=150, color_discrete_map=dynamic_colors
         )
         
-        # 🚨 基本は「文字サイズ14px」で棒の「内側」に表示する。
-        # 入り切らない（文字が小さくなりすぎる）場合は、自動的に文字を非表示（hidden）にする設定
+        # ✅ エラー修正箇所：textfont の書き方を Plotly のルールに正しく修正しました
         fig.update_traces(
             textposition='inside', 
             insidetextanchor='middle', 
-            textfont=dict(size=14, color="#1C1E21"),
-            constraintext='hide', # 👈 ココ！入り切らない時は文字を潰さず、一旦隠す
+            textfont_size=14,         # 文字サイズ指定
+            textfont_color="#1C1E21",  # 文字色指定
+            constraintext='hide',      # 入り切らない時は文字を潰さず、一旦隠す
             marker_line_width=0
         )
         
-        # 🚨 隠された（＝時間が短すぎる）項目だけを判定して、引き出し線を伸ばす
+        # 隠された（＝時間が短すぎる）項目だけを判定して、引き出し線を伸ばす
         annotations = []
         for i, (_, row) in enumerate(df_day.iterrows()):
             # 1マスの時間（分）を計算
