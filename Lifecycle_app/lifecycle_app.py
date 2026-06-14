@@ -20,35 +20,84 @@ SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ==========================================
-# 💅 スマホに特化した見やすいデザイン（CSS）
+# 💅 スマホに特化した見やすいデザイン（CSS修正版）
 # ==========================================
 st.markdown("""
 <style>
+    /* 全体の背景と基本の文字色 */
     .stApp { background-color: #F4F7F8; font-family: 'Helvetica Neue', sans-serif; }
-    h1, h2, h3, h4, h5, h6, p, label { color: #1C1E21 !important; }
+    
+    /* ヘッダーの非表示と余白調整 */
     [data-testid="stHeader"] { visibility: hidden; }
     .block-container { padding-top: 1rem; padding-bottom: 5rem; }
-    [data-baseweb="popover"] > div { background-color: #FFFFFF !important; }
-    [data-baseweb="popover"] * { color: #1C1E21 !important; }
-    [data-baseweb="calendar"] [aria-selected="true"],
-    [data-baseweb="calendar"] [aria-selected="true"] * { background-color: #FF69B4 !important; color: #FFFFFF !important; }
+    
+    /* 🚨 入力欄（テキスト入力、セレクトボックス、日付、時間など）の強制色指定 */
+    div[data-baseweb="input"] input, 
+    div[data-baseweb="select"] select, 
+    div[data-baseweb="select"] div,
+    .stTextArea textarea {
+        color: #1C1E21 !important; /* 文字を絶対に濃いグレーにする */
+        -webkit-text-fill-color: #1C1E21 !important; /* スマホ（Safari等）対策 */
+    }
+    
+    /* 入力欄の枠線と背景 */
     div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
-        background-color: #FFFFFF !important; border: 2px solid #EAECEF !important;
-        border-radius: 12px !important; padding: 2px 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+        background-color: #FFFFFF !important; 
+        border: 2px solid #EAECEF !important;
+        border-radius: 12px !important; 
+        padding: 2px 5px; 
+        box-shadow: 0 2px 5px rgba(0,0,0,0.02);
     }
+    
+    /* 入力欄をタップしたときの動き */
     div[data-baseweb="input"] > div:focus-within, div[data-baseweb="select"] > div:focus-within {
-        border-color: #FFB6C1 !important; box-shadow: 0 0 8px rgba(255, 182, 193, 0.6) !important;
+        border-color: #FFB6C1 !important; 
+        box-shadow: 0 0 8px rgba(255, 182, 193, 0.6) !important;
     }
+    
+    /* カレンダーやポップアップの中の文字色 */
+    [data-baseweb="popover"] div, 
+    [data-baseweb="popover"] span, 
+    [data-baseweb="calendar"] * { 
+        color: #1C1E21 !important; 
+    }
+    
+    /* カレンダーで選択された日の見た目 */
+    [data-baseweb="calendar"] [aria-selected="true"],
+    [data-baseweb="calendar"] [aria-selected="true"] * { 
+        background-color: #FF69B4 !important; 
+        color: #FFFFFF !important; 
+    }
+    
+    /* ボタンのデザイン */
     div.stButton > button {
-        border-radius: 20px !important; font-weight: bold !important; padding: 10px 0 !important; 
-        border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.08); background-color: #FFFFFF !important; transition: all 0.2s ease;
+        border-radius: 20px !important; 
+        font-weight: bold !important; 
+        padding: 10px 0 !important; 
+        border: none; 
+        box-shadow: 0 4px 6px rgba(0,0,0,0.08); 
+        background-color: #FFFFFF !important; 
         color: #1C1E21 !important;
+        transition: all 0.2s ease;
     }
     div.stButton > button:active { transform: translateY(2px); }
-    div.stButton > button[kind="primary"] { background-color: #FF69B4 !important; color: #FFFFFF !important; }
+    div.stButton > button[kind="primary"] { 
+        background-color: #FF69B4 !important; 
+        color: #FFFFFF !important; 
+    }
+    
+    /* 履歴カードの見た目 */
     .list-card {
-        background-color: #FFFFFF; padding: 15px; border-radius: 15px; margin-bottom: 10px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.04); border: 1px solid #EAECEF;
+        background-color: #FFFFFF; 
+        padding: 15px; 
+        border-radius: 15px; 
+        margin-bottom: 10px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04); 
+        border: 1px solid #EAECEF;
+        color: #1C1E21 !important;
+    }
+    .list-card * {
+        color: #1C1E21 !important;
     }
 </style>
 """, unsafe_allow_html=True)
