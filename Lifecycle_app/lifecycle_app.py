@@ -387,7 +387,7 @@ elif mode == "📊 分析":
             sum_df = df_filtered.groupby("カテゴリ")["時間（h）"].sum().reset_index()
             total_hours = round(sum_df["時間（h）"].sum(), 1)
             
-            # 🚨 【解決策1】 割合の小さな項目でも潰れないように円グラフの設定を大幅に強化しました！
+            # 割合の小さな項目でも潰れないように円グラフの設定を大幅に強化しました！
             fig_pie = px.pie(sum_df, values='時間（h）', names='カテゴリ', color='カテゴリ', color_discrete_map=dynamic_colors, hole=0.4)
             
             # 文字の位置を「外側（outside）」に強制し、勝手に文字が小さくなるのをストップ
@@ -411,6 +411,25 @@ elif mode == "📊 分析":
             )
             
             st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
+            
+            # 🚨【新設】円グラフの下に表示する詳細データ表の作成
+            st.markdown(f"<p style='font-size:1.0rem; font-weight:bold; color:#555; margin-bottom:5px;'>📋 「{period}」のカテゴリ別詳細</p>", unsafe_allow_html=True)
+            
+            # 合計時間が長い順（降順）に並び替える
+            df_table = sum_df.sort_values(by="時間（h）", ascending=False).copy()
+            
+            # パーセント（％）を計算して文字にする
+            df_table["割合"] = (df_table["時間（h）"] / total_hours * 100).round(1).astype(str) + " %"
+            # 時間の表示を綺麗にする（例: 42.5 時間）
+            df_table["合計時間"] = df_table["時間（h）"].round(1).astype(str) + " 時間"
+            
+            # 列の整理
+            df_table = df_table[["カテゴリ", "合計時間", "割合"]]
+            
+            # 綺麗なテーブル形式でStreamlitに表示（インデックスは非表示）
+            st.dataframe(df_table, use_container_width=True, hide_index=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+            
             st.info(f"💡 「{period}」の合計記録時間は **{total_hours} 時間** です。")
         else: st.warning("この期間の記録はありません。")
     else: st.write("データがありません。")
