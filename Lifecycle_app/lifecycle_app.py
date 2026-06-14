@@ -14,9 +14,17 @@ st.set_page_config(page_title="ライフログ", layout="wide", initial_sidebar_
 st.markdown("""
 <style>
     .stApp { background-color: #F4F7F8; font-family: 'Helvetica Neue', sans-serif; }
-    h1, h2, h3, h4, h5, h6, p, span, label, div { color: #1C1E21 !important; }
+    
+    /* 💡 修正ポイント：強すぎた文字色指定を緩め、必要な場所（見出しや段落）だけに適用 */
+    h1, h2, h3, h4, h5, h6, p, label { color: #1C1E21 !important; }
+    
     [data-testid="stHeader"] { visibility: hidden; }
     .block-container { padding-top: 1rem; padding-bottom: 5rem; }
+    
+    /* 💡 修正ポイント：カレンダーのポップアップを強制的に白背景・黒文字に固定！ */
+    [data-baseweb="calendar"] {
+        background-color: #FFFFFF !important;
+    }
     
     div[data-baseweb="input"] > div, div[data-baseweb="select"] > div {
         background-color: #FFFFFF !important; border: 2px solid #EAECEF !important;
@@ -29,8 +37,11 @@ st.markdown("""
     div.stButton > button {
         border-radius: 20px !important; font-weight: bold !important; padding: 10px 0 !important; 
         border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.08); background-color: #FFFFFF !important; transition: all 0.2s ease;
+        color: #1C1E21 !important; /* 💡 通常ボタンの文字色を明示的に黒に */
     }
     div.stButton > button:active { transform: translateY(2px); }
+    
+    /* ピンクの主役ボタンは白文字にする */
     div.stButton > button[kind="primary"] { background-color: #FF69B4 !important; color: #FFFFFF !important; }
     
     .list-card {
@@ -362,9 +373,6 @@ elif mode == "📜 削除":
                 st.markdown("</div>", unsafe_allow_html=True)
     else: st.write("データがありません。")
 
-# ----------------------------
-# 🏷️ カテゴリ編集モード（💡 バグ修正済み！）
-# ----------------------------
 elif mode == "🏷️ カテゴリ":
     st.markdown("#### カテゴリの編集")
     st.info("💡 表の下の「＋」で追加できます。\n⚠️ 編集が終わったら、必ず下の**「保存ボタン」**を押してください。")
@@ -372,12 +380,10 @@ elif mode == "🏷️ カテゴリ":
     df_cat = pd.DataFrame(st.session_state.categories, columns=["カテゴリ名"])
     edited_df_cat = st.data_editor(df_cat, num_rows="dynamic", use_container_width=True, key="cat_editor")
     
-    # 💡 無限ループ（白画面）防止のため、保存を「手動ボタン」に変更しました！
     if st.button("💾 変更を保存する", type="primary", use_container_width=True):
-        # 入力された文字を綺麗に整理する安全な処理
         new_cats = edited_df_cat["カテゴリ名"].dropna().astype(str).str.strip().tolist()
         new_cats = [c for c in new_cats if c != "" and c != "None"]
-        new_cats = list(dict.fromkeys(new_cats)) # 重複を削除
+        new_cats = list(dict.fromkeys(new_cats)) 
         
         if len(new_cats) > 0:
             st.session_state.categories = new_cats
