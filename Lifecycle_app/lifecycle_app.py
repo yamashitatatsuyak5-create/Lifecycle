@@ -5,11 +5,10 @@ import plotly.express as px
 from supabase import create_client, Client
 import hashlib
 
-# 🚨 Google Calendar API 用のライブラリ
-import os
+# 🚨 Google Calendar API 用のライブラリ（クラウド用に整理）
+import json
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 # -------------------------------------------------
@@ -151,27 +150,27 @@ cat_others = "その他 💬" if "その他 💬" in st.session_state.categories
 if cat_others not in dynamic_colors: dynamic_colors[cat_others] = "#E0E0E0"
 
 # -------------------------------------------------
-# 🚀 Googleカレンダー取得関数
+# 🚀 Googleカレンダー取得関数（クラウド完全対応版）
 # -------------------------------------------------
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
 def fetch_gcal_events(target_date):
-    creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    # SecretsにGOOGLE_TOKENがあるか確認
+    if "GOOGLE_TOKEN" not in st.secrets:
+        return None, "⚠️ StreamlitのSecretsに 'GOOGLE_TOKEN' が設定されていません。"
     
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not os.path.exists('credentials.json'):
-                return None, "⚠️ credentials.json が見つかりません。アプリと同じフォルダに配置してください。"
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
-
     try:
+        # SecretsからJSON文字列を読み込んで辞書に変換
+        token_info = json.loads(st.secrets["GOOGLE_TOKEN"])
+        
+        # 辞書データから認証情報（通行証）を復元
+        creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+        
+        # 通行証の期限が切れていたら、新しいものを再発行（自動）
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+
+        # Googleカレンダーにアクセス
         service = build('calendar', 'v3', credentials=creds)
         dt_start = datetime.combine(target_date, time.min)
         dt_end = datetime.combine(target_date, time.max)
@@ -182,6 +181,7 @@ def fetch_gcal_events(target_date):
             calendarId='primary', timeMin=timeMin, timeMax=timeMax,
             singleEvents=True, orderBy='startTime').execute()
         return events_result.get('items', []), None
+        
     except Exception as e:
         return None, f"エラーが発生しました: {e}"
 
@@ -201,7 +201,6 @@ def split_time_selectbox(label, default_h, default_m, key_suffix):
         m_str = st.selectbox("分", minutes, index=minutes.index(dm), key=f"m_{key_suffix}", label_visibility="collapsed")
     return f"{h_str}:{m_str}"
 
-# 🚨 "24:00" エラーを回避するように修正
 def check_overlap(date_str, s_str, e_str, df, exclude_id=None):
     if df.empty: return False,None
     dfc = df.copy()
@@ -223,7 +222,6 @@ def check_overlap(date_str, s_str, e_str, df, exclude_id=None):
     if not ov.empty: return True, ov.iloc[0]["カテゴリ"]
     return False,None
 
-# 🚨 "24:00" エラーを回避するように修正
 def merge_continuous(df):
     if df.empty: return df
     d = df.copy()
@@ -478,11 +476,11 @@ elif mode=="📝 追加":
     # 🚨 ここに Google カレンダー同期ボタン
     st.markdown("#### 📅 Googleカレンダー同期")
     if st.button(f"✨ {date_str} の予定をGoogleから取り込む", use_container_width=True):
-        with st.spinner("Googleカレンダーと通信中...（初回はブラウザで認証画面が開きます）"):
+        with st.spinner("Googleカレンダーと通信中..."):
             events, err = fetch_gcal_events(st.session_state.target_date)
             if err:
                 st.error(err)
-            elif events:
+            elif events is not None:
                 success_count = 0
                 for event in events:
                     if 'dateTime' not in event['start']:
@@ -513,8 +511,6 @@ elif mode=="📝 追加":
                     st.rerun()
                 else:
                     st.info("取り込める新しい予定はありませんでした（既存の予定との重複、または終日予定を除外しました）。")
-            else:
-                st.info("この日の予定は見つかりませんでした。")
 
 # 3. 📊 分析モード
 elif mode=="📊 分析":
