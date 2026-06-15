@@ -75,12 +75,15 @@ if "code" in st.query_params and "state" in st.query_params:
             # セッションを復元し、成功フラグを立てる
             st.session_state.current_user = callback_user
             st.session_state["oauth_success"] = True
-        except Exception as e:
-            st.error(f"Google連携中にエラーが発生しました: {e}")
             
-    # URLのパラメータを綺麗に消去して画面をリロード
-    st.query_params.clear()
-    st.rerun()
+            # 【変更点】成功した時だけURLを綺麗にして画面をリロードする
+            st.query_params.clear()
+            st.rerun()
+            
+        except Exception as e:
+            # 【変更点】エラーが起きたらここでストップして画面に表示！
+            st.error(f"⚠️ 連携の保存中にエラーが発生しました: {e}")
+            st.stop()
 
 # -------------------------------------------------
 # CSS ＆ デザイン調整
