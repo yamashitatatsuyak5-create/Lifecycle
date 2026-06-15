@@ -1,9 +1,16 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 import plotly.express as px
 from supabase import create_client, Client
 import hashlib
+
+# 🚨 Google Calendar API 用のライブラリ
+import os
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
 
 # -------------------------------------------------
 # ページ設定
@@ -20,10 +27,7 @@ SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # -------------------------------------------------
-# CSS ＆ “スマホキーボード殺し” JavaScript
-# -------------------------------------------------
-# -------------------------------------------------
-# CSS ＆ JavaScript
+# CSS ＆ デザイン調整
 # -------------------------------------------------
 st.markdown("""
 <style>
@@ -37,6 +41,7 @@ div.stButton>button{border-radius:12px!important;font-weight:bold!important;}
 }
 </style>
 """, unsafe_allow_html=True)
+
 # -------------------------------------------------
 # 定数 & ユーティリティ
 # -------------------------------------------------
@@ -72,7 +77,6 @@ if st.session_state.current_user is None:
 
     tab_login, tab_signup = st.tabs(["ログイン","新規登録"])
 
-    # --- ログイン ---
     with tab_login:
         u = st.text_input("ユーザー名", key="login_name")
         p = st.text_input("パスワード", type="password", key="login_pass")
@@ -84,7 +88,6 @@ if st.session_state.current_user is None:
             else:
                 st.error("ユーザー名かパスワードが違います。")
 
-    # --- サインアップ ---
     with tab_signup:
         u = st.text_input("好きなユーザー名", key="signup_name")
         p = st.text_input("好きなパスワード", type="password", key="signup_pass")
@@ -113,12 +116,10 @@ if st.session_state.current_user is None:
 user_name = st.session_state.current_user
 
 def load_db():
-    # カテゴリ
     cats = supabase.table("timeline_categories").select("category_name") \
             .eq("user_name",user_name).execute().data
     st.session_state.categories = [c["category_name"] for c in cats] if cats else ["未設定"]
 
-    # ログ
     logs = supabase.table("timeline_data").select("*") \
             .eq("user_name",user_name).execute().data
     df = pd.DataFrame(logs) if logs else \
@@ -128,7 +129,6 @@ def load_db():
         "category":"カテゴリ","detail":"内容"
     })
 
-    # ルーティン
     rts = supabase.table("timeline_routine").select("*") \
             .eq("user_name",user_name).execute().data
     df_rt = pd.DataFrame(rts) if rts else \
@@ -144,77 +144,84 @@ if st.session_state.need_reload:
 
 ui_log     = st.session_state.ui_log
 ui_routine = st.session_state.ui_routine
-dynamic_colors = {c: PASTEL_PALETTE[i%len(PASTEL_PALETTE)]
-                  for i,c in enumerate(st.session_state.categories)}
+
+# カラーパレット生成
+dynamic_colors = {c: PASTEL_PALETTE[i%len(PASTEL_PALETTE)] for i,c in enumerate(st.session_state.categories)}
+cat_others = "その他 💬" if "その他 💬" in st.session_state.categories else "その他"
+if cat_others not in dynamic_colors: dynamic_colors[cat_others] = "#E0E0E0"
+
+# -------------------------------------------------
+# 🚀 Googleカレンダー取得関数
+# -------------------------------------------------
+SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+
+def fetch_gcal_events(target_date):
+    creds = None
+    # 以前ログインした記録（token.json）があれば読み込む
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    
+    # トークンがない、または期限切れの場合は再ログイン
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            if not os.path.exists('credentials.json'):
+                return None, "⚠️ credentials.json が見つかりません。アプリと同じフォルダに配置してください。"
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            # 初回はここでブラウザが開き、Googleのログイン画面が出ます
+            creds = flow.run_local_server(port=0)
+        # ログイン記録を保存
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+
+    try:
+        service = build('calendar', 'v3', credentials=creds)
+        # 対象日の00:00:00〜23:59:59をセット
+        dt_start = datetime.combine(target_date, time.min)
+        dt_end = datetime.combine(target_date, time.max)
+        
+        # JSTのままRFC3339形式に変換
+        timeMin = dt_start.isoformat() + '+09:00'
+        timeMax = dt_end.isoformat() + '+09:00'
+
+        events_result = service.events().list(
+            calendarId='primary', timeMin=timeMin, timeMax=timeMax,
+            singleEvents=True, orderBy='startTime').execute()
+        return events_result.get('items', []), None
+    except Exception as e:
+        return None, f"エラーが発生しました: {e}"
 
 # -------------------------------------------------
 # 共通関数
 # -------------------------------------------------
 def split_time_selectbox(label, default_h, default_m, key_suffix):
-    """
-    時間：数字キーボードで直接入力
-    分：selectbox（ドラムロール）
-    """
-    st.markdown(f"<small style='color:#555;font-weight:bold;'>{label}</small>", 
-                unsafe_allow_html=True)
-    
+    st.markdown(f"<small style='color:#555;font-weight:bold;'>{label}</small>", unsafe_allow_html=True)
     minutes = ["00","15","30","45"]
     dm = f"{int(default_m):02d}" if f"{int(default_m):02d}" in minutes else "00"
     
     c_h, c_m = st.columns(2)
-    
-    # --- 時間：数字キーボード入力 ---
     with c_h:
-        h_val = st.number_input(
-            "時",
-            min_value=0,
-            max_value=23,
-            value=int(default_h),
-            step=1,
-            key=f"h_{key_suffix}",
-            label_visibility="collapsed"
-        )
+        h_val = st.number_input("時", min_value=0, max_value=23, value=int(default_h), step=1, key=f"h_{key_suffix}", label_visibility="collapsed")
         h_str = f"{int(h_val):02d}"
-    
-    # --- 分：selectbox（ドラムロール） ---
     with c_m:
-        m_str = st.selectbox(
-            "分",
-            minutes,
-            index=minutes.index(dm),
-            key=f"m_{key_suffix}",
-            label_visibility="collapsed"
-        )
-    
+        m_str = st.selectbox("分", minutes, index=minutes.index(dm), key=f"m_{key_suffix}", label_visibility="collapsed")
     return f"{h_str}:{m_str}"
 
 def check_overlap(date_str, s_str, e_str, df, exclude_id=None):
     if df.empty: return False,None
     dfc = df.copy()
-    if exclude_id is not None:
-        dfc = dfc[dfc["id"]!=exclude_id]
+    if exclude_id is not None: dfc = dfc[dfc["id"]!=exclude_id]
     if dfc.empty: return False,None
-
     ns  = pd.to_datetime(f"{date_str} {s_str}")
     ne  = pd.to_datetime(f"{date_str} {e_str}")
     if ne<=ns: ne += timedelta(days=1)
-
     dfc["Start_dt"] = pd.to_datetime(dfc["日付"] + " " + dfc["開始時刻"])
     dfc["End_dt"]   = pd.to_datetime(dfc["日付"] + " " + dfc["終了時刻"])
     dfc.loc[dfc["End_dt"]<dfc["Start_dt"],"End_dt"] += timedelta(days=1)
-
     ov = dfc[(ns < dfc["End_dt"]) & (ne > dfc["Start_dt"])]
-    if not ov.empty:
-        return True, ov.iloc[0]["カテゴリ"]
+    if not ov.empty: return True, ov.iloc[0]["カテゴリ"]
     return False,None
-
-def round15(dt):
-    discard = timedelta(minutes=dt.minute%15, seconds=dt.second,
-                        microseconds=dt.microsecond)
-    dt -= discard
-    if discard >= timedelta(minutes=7,seconds=30):
-        dt += timedelta(minutes=15)
-    return dt
 
 def merge_continuous(df):
     if df.empty: return df
@@ -223,7 +230,6 @@ def merge_continuous(df):
     d["End_dt"]   = pd.to_datetime(d["日付"]+" "+d["終了時刻"])
     d.loc[d["End_dt"]<d["Start_dt"],"End_dt"] += timedelta(days=1)
     d = d.sort_values("Start_dt").reset_index(drop=True)
-
     merged = []
     cur = d.iloc[0].to_dict()
     for i in range(1,len(d)):
@@ -237,6 +243,40 @@ def merge_continuous(df):
             merged.append(cur); cur=nxt
     merged.append(cur)
     return pd.DataFrame(merged)
+
+def fill_blank_time(df_day, date_str, default_cat):
+    sod = pd.to_datetime(f"{date_str} 00:00:00")
+    eod = sod + timedelta(days=1)
+    
+    if df_day.empty:
+        return pd.DataFrame([{
+            "日付": date_str, "開始時刻": "00:00", "終了時刻": "24:00",
+            "カテゴリ": default_cat, "内容": "", "Start_dt": sod, "End_dt": eod
+        }])
+
+    df_day = df_day.sort_values("Start_dt").reset_index(drop=True)
+    filled = []
+    curr = sod
+    
+    for _, row in df_day.iterrows():
+        st_dt = row["Start_dt"]
+        en_dt = row["End_dt"]
+        if curr < st_dt:
+            filled.append({
+                "日付": date_str, "開始時刻": curr.strftime("%H:%M"), "終了時刻": st_dt.strftime("%H:%M"),
+                "カテゴリ": default_cat, "内容": "", "Start_dt": curr, "End_dt": st_dt
+            })
+        filled.append(row.to_dict())
+        if curr < en_dt:
+            curr = en_dt
+            
+    if curr < eod:
+        filled.append({
+            "日付": date_str, "開始時刻": curr.strftime("%H:%M"), "終了時刻": "24:00",
+            "カテゴリ": default_cat, "内容": "", "Start_dt": curr, "End_dt": eod
+        })
+        
+    return pd.DataFrame(filled)
 
 # -------------------------------------------------
 # 🗓️ ヘッダー / ログアウト
@@ -275,54 +315,43 @@ st.markdown(f"<div style='text-align:center;font-size:0.95rem;"
 # -------------------------------------------------
 # 📊 タイムライン描画
 # -------------------------------------------------
-if not ui_log.empty:
-    raw = ui_log.copy()
-    day_raw = raw[raw["日付"]==date_str].copy()
-    sod = pd.to_datetime(f"{date_str} 00:00:00")
-    eod = sod + timedelta(days=1)
+raw = ui_log.copy()
+day_raw = raw[raw["日付"]==date_str].copy() if not raw.empty else pd.DataFrame()
 
-    if not day_raw.empty:
-        day = merge_continuous(day_raw)
-        day["時間(h)"] = (day["End_dt"]-day["Start_dt"]).dt.total_seconds()/3600.0
-        day["文字"] = day.apply(
-            lambda r: r["カテゴリ"] if
-            (r["End_dt"]-r["Start_dt"]).total_seconds()/60>=45 else "", axis=1)
+sod = pd.to_datetime(f"{date_str} 00:00:00")
+eod = sod + timedelta(days=1)
 
-        fig = px.timeline(day, x_start="Start_dt", x_end="End_dt", y="日付",
-                          color="カテゴリ", text="文字",
-                          hover_name="内容", height=180,
-                          color_discrete_map=dynamic_colors)
-        fig.update_traces(textposition='inside',
-                          insidetextanchor='middle',
-                          textfont_size=15, marker_line_width=0)
-        fig.update_layout(xaxis=dict(tickformat="%H:%M",range=[sod,eod],
-                          dtick=14400000,fixedrange=True,
-                          tickfont=dict(size=13,color="#555")),
-                          yaxis=dict(showticklabels=False,fixedrange=True),
-                          showlegend=False,dragmode=False,
-                          margin=dict(l=10,r=10,t=10,b=85),
-                          plot_bgcolor='rgba(0,0,0,0)',
-                          paper_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig, use_container_width=True,
-                        config={"displayModeBar":False})
+day = merge_continuous(day_raw)
+day = fill_blank_time(day, date_str, cat_others)
+day = merge_continuous(day)
 
-        total = day["時間(h)"].sum()
-        st.info(f"✨ 記録済み: {round(total,1)} 時間 "
-                f"（空き: {round(24-total,1)} 時間）")
-    else:
-        empty = pd.DataFrame({"日付":[date_str],
-                              "Start_dt":[sod],"End_dt":[sod],
-                              "カテゴリ":["未記録"]})
-        fig = px.timeline(empty, x_start="Start_dt", x_end="End_dt", y="日付", height=130)
-        fig.update_layout(xaxis=dict(tickformat="%H:%M",range=[sod,eod],
-                          dtick=14400000,fixedrange=True),
-                          yaxis=dict(showticklabels=False,fixedrange=True),
-                          showlegend=False,dragmode=False,
-                          margin=dict(l=0,r=0,t=0,b=0),
-                          plot_bgcolor='rgba(0,0,0,0)',
-                          paper_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig, use_container_width=True,
-                        config={"displayModeBar":False})
+day["時間(h)"] = (day["End_dt"]-day["Start_dt"]).dt.total_seconds()/3600.0
+day["文字"] = day.apply(
+    lambda r: r["カテゴリ"] if
+    (r["End_dt"]-r["Start_dt"]).total_seconds()/60>=45 else "", axis=1)
+
+fig = px.timeline(day, x_start="Start_dt", x_end="End_dt", y="日付",
+                  color="カテゴリ", text="文字",
+                  hover_name="内容", height=180,
+                  color_discrete_map=dynamic_colors)
+fig.update_traces(textposition='inside',
+                  insidetextanchor='middle',
+                  textfont_size=15, marker_line_width=0)
+fig.update_layout(xaxis=dict(tickformat="%H:%M",range=[sod,eod],
+                  dtick=14400000,fixedrange=True,
+                  tickfont=dict(size=13,color="#555")),
+                  yaxis=dict(showticklabels=False,fixedrange=True),
+                  showlegend=False,dragmode=False,
+                  margin=dict(l=10,r=10,t=10,b=85),
+                  plot_bgcolor='rgba(0,0,0,0)',
+                  paper_bgcolor='rgba(0,0,0,0)')
+st.plotly_chart(fig, use_container_width=True,
+                config={"displayModeBar":False})
+
+real_recorded = day[day["カテゴリ"] != cat_others]["時間(h)"].sum()
+st.info(f"✨ 実質記録: {round(real_recorded,1)} 時間 "
+        f"（その他・空き: {round(24-real_recorded,1)} 時間）")
+
 st.markdown("---")
 
 # -------------------------------------------------
@@ -367,12 +396,15 @@ if mode=="⏱️ 計測":
         st.success(f"⏳ {st.session_state.tracking_cat} 計測中\n\n"
                    f"開始: {st.session_state.tracking_start.strftime('%H:%M')}")
         rt_det = st.text_input("メモ（任意）", key="rt_detail")
-        if st.button("⏹️ 今終わった！（15分単位で記録）",
+        
+        if st.button("⏹️ 今終わった！（1分単位で記録）",
                      type="primary", use_container_width=True):
             end_dt = get_now_jst()
-            s_ = round15(st.session_state.tracking_start)
-            e_ = round15(end_dt)
-            if s_==e_: e_ += timedelta(minutes=15)
+            
+            s_ = st.session_state.tracking_start.replace(second=0, microsecond=0)
+            e_ = end_dt.replace(second=0, microsecond=0)
+            if s_ == e_: e_ += timedelta(minutes=1)
+                
             s_str, e_str = s_.strftime('%H:%M'), e_.strftime('%H:%M')
             rec_date = s_.strftime('%Y-%m-%d')
 
@@ -423,7 +455,7 @@ elif mode=="📝 追加":
                     st.session_state.need_reload=True
                     st.rerun()
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("---")
     if st.button(f"✨ {weekday}曜日のルーティンを一括追加",
                  use_container_width=True):
         r_for_day = ui_routine[ui_routine["曜日"]==weekday]
@@ -438,14 +470,58 @@ elif mode=="📝 追加":
                         "start_time":r["開始時刻"],"end_time":r["終了時刻"],
                         "category":r["カテゴリ"],"detail":r["内容"]
                     }).execute()
-            st.session_state.need_reload=True
-            st.rerun()
+            st.session_state.need_reload=True; st.rerun()
+
+    # 🚨 ここに Google カレンダー同期ボタンを追加！
+    st.markdown("#### 📅 Googleカレンダー同期")
+    if st.button(f"✨ {date_str} の予定をGoogleから取り込む", use_container_width=True):
+        with st.spinner("Googleカレンダーと通信中...（初回はブラウザで認証画面が開きます）"):
+            events, err = fetch_gcal_events(st.session_state.target_date)
+            if err:
+                st.error(err)
+            elif events:
+                success_count = 0
+                for event in events:
+                    # 終日イベント（dateTimeがなくdateのみ）はスキップ
+                    if 'dateTime' not in event['start']:
+                        continue
+                    
+                    # 開始時間と終了時間の取得
+                    start_dt = datetime.fromisoformat(event['start']['dateTime'])
+                    end_dt = datetime.fromisoformat(event['end']['dateTime'])
+                    
+                    s_str = start_dt.strftime('%H:%M')
+                    e_str = end_dt.strftime('%H:%M')
+                    title = event.get('summary', '予定なし')
+                    
+                    # カレンダーの予定が重なっていないかチェック
+                    ov, _ = check_overlap(date_str, s_str, e_str, ui_log)
+                    if not ov:
+                        supabase.table("timeline_data").insert({
+                            "user_name": user_name,
+                            "date": date_str,
+                            "start_time": s_str,
+                            "end_time": e_str,
+                            "category": cat_others,
+                            "detail": f"🗓️ {title}"
+                        }).execute()
+                        success_count += 1
+                
+                if success_count > 0:
+                    st.session_state.need_reload = True
+                    st.success(f"🎉 {success_count}件の予定を取り込みました！")
+                    st.rerun()
+                else:
+                    st.info("取り込める新しい予定はありませんでした（既存の予定との重複、または終日予定を除外しました）。")
+            else:
+                st.info("この日の予定は見つかりませんでした。")
 
 # 3. 📊 分析モード
 elif mode=="📊 分析":
     st.markdown("#### 時間の使い方のバランス")
     period = st.selectbox("分析する期間",
                           ["過去7日間","過去30日間","全期間","今日"])
+    
     if ui_log.empty:
         st.write("データがありません。")
     else:
@@ -460,10 +536,18 @@ elif mode=="📊 分析":
             filt = dfa[dfa["D"] >= today - timedelta(days=29)]
         else:
             filt = dfa
+            
         if filt.empty:
             st.warning("この期間の記録はありません。")
         else:
-            merged = pd.concat([merge_continuous(x) for _,x in filt.groupby("日付")])
+            merged_list = []
+            for d_str, x in filt.groupby("日付"):
+                m = merge_continuous(x)
+                m = fill_blank_time(m, d_str, cat_others)
+                m = merge_continuous(m)
+                merged_list.append(m)
+            merged = pd.concat(merged_list)
+            
             merged["時間(h)"] = (merged["End_dt"]-merged["Start_dt"]).dt.total_seconds()/3600.0
             sm = merged.groupby("カテゴリ")["時間(h)"].sum().reset_index()
             total_h = round(sm["時間(h)"].sum(),1)
