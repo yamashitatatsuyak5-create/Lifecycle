@@ -65,11 +65,9 @@ if "code" in st.query_params and "state" in st.query_params:
     flow = create_oauth_flow(REDIRECT_URI)
     if flow:
         try:
-            # ★【変更点】ボタンを押した時に保存した合言葉をセッションから持ってくる
-            saved_verifier = st.session_state.get("google_code_verifier")
-            
-            # 引換券(code)と合言葉(code_verifier)を使って、正式な通行証(トークン)を取得
-            flow.fetch_token(code=auth_code, code_verifier=saved_verifier)
+            # ★【変更点】PKCEを使わない方式にしたため、合言葉(verifier)の指定は一切不要になります！
+            # 引換券(code)を使って、正式な通行証(トークン)を取得
+            flow.fetch_token(code=auth_code)
             creds = flow.credentials
             
             # そのユーザー専用の通行証をSupabaseのusersテーブルに保存！
@@ -86,7 +84,6 @@ if "code" in st.query_params and "state" in st.query_params:
         except Exception as e:
             st.error(f"⚠️ 連携の保存中にエラーが発生しました: {e}")
             st.stop()
-
 # -------------------------------------------------
 # CSS ＆ デザイン調整
 # -------------------------------------------------
@@ -550,19 +547,34 @@ elif mode=="📝 追加":
     res_token = supabase.table("users").select("google_token").eq("user_name", user_name).execute()
     has_token = res_token.data[0]["google_token"] if (res_token.data and res_token.data[0]["google_token"]) else None
     
-    # --- 【整理済】ここから1つのキレイな分岐にまとめました ---
     if not has_token:
         st.info("💡 各自のGoogleアカウントの予定を取り込むには、最初に以下のボタンから連携を行ってください。")
-        flow = create_oauth_flow(REDIRECT_URI)
-        if flow:
-            # 毎回確実にリフレッシュトークン（自動更新鍵）をもらうための設定
-            # state にログイン中のユーザー名を入れてGoogleに渡すことで、戻ってきたときに誰のトークンか判別させます
-            auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline', state=user_name)
+        
+        # ★【変更点】Googleの自動合言葉チェック(PKCE)によるバグを回避するため、
+        # 安全な認証URLを直接手動で組み立ててボタンにセットします。
+        import json
+        import urllib.parse
+        try:
+            creds_data = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+            web_config = creds_data.get("web", creds_data.get("installed", {}))
+            client_id = web_config.get("client_id")
             
-            # ★ Googleに飛ぶ前に、自動生成された合言葉をセッションにしっかり保存
-            st.session_state["google_code_verifier"] = flow.code_verifier
+            # 認証に必要なパラメータをセット
+            params = {
+                "client_id": client_id,
+                "redirect_uri": REDIRECT_URI,
+                "response_type": "code",
+                "scope": "https://www.googleapis.com/auth/calendar.readonly",
+                "access_type": "offline",
+                "prompt": "consent",
+                "state": user_name
+            }
+            auth_url = "https://accounts.google.com/o/oauth2/auth?" + urllib.parse.urlencode(params)
             
             st.link_button("🔗 Googleアカウントと連携する", auth_url, use_container_width=True)
+            
+        except Exception as e:
+            st.error(f"🚨 認証URLの作成に失敗しました。Secretsの設定を確認してください: {e}")
             
     else:
         # すでに連携済みの場合は、「取り込み」と「連携解除」ボタンを表示します
