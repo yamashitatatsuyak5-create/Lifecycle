@@ -157,11 +157,9 @@ SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
 def fetch_gcal_events(target_date):
     creds = None
-    # 以前ログインした記録（token.json）があれば読み込む
     if os.path.exists('token.json'):
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
     
-    # トークンがない、または期限切れの場合は再ログイン
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
@@ -169,19 +167,14 @@ def fetch_gcal_events(target_date):
             if not os.path.exists('credentials.json'):
                 return None, "⚠️ credentials.json が見つかりません。アプリと同じフォルダに配置してください。"
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            # 初回はここでブラウザが開き、Googleのログイン画面が出ます
             creds = flow.run_local_server(port=0)
-        # ログイン記録を保存
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
 
     try:
         service = build('calendar', 'v3', credentials=creds)
-        # 対象日の00:00:00〜23:59:59をセット
         dt_start = datetime.combine(target_date, time.min)
         dt_end = datetime.combine(target_date, time.max)
-        
-        # JSTのままRFC3339形式に変換
         timeMin = dt_start.isoformat() + '+09:00'
         timeMax = dt_end.isoformat() + '+09:00'
 
@@ -208,28 +201,38 @@ def split_time_selectbox(label, default_h, default_m, key_suffix):
         m_str = st.selectbox("分", minutes, index=minutes.index(dm), key=f"m_{key_suffix}", label_visibility="collapsed")
     return f"{h_str}:{m_str}"
 
+# 🚨 "24:00" エラーを回避するように修正
 def check_overlap(date_str, s_str, e_str, df, exclude_id=None):
     if df.empty: return False,None
     dfc = df.copy()
     if exclude_id is not None: dfc = dfc[dfc["id"]!=exclude_id]
     if dfc.empty: return False,None
-    ns  = pd.to_datetime(f"{date_str} {s_str}")
-    ne  = pd.to_datetime(f"{date_str} {e_str}")
-    if ne<=ns: ne += timedelta(days=1)
+    
+    ns_str = s_str.replace("24:00", "00:00")
+    ne_str = e_str.replace("24:00", "00:00")
+    ns  = pd.to_datetime(f"{date_str} {ns_str}")
+    ne  = pd.to_datetime(f"{date_str} {ne_str}")
+    if e_str == "24:00" or ne <= ns: ne += timedelta(days=1)
+    
+    dfc["_end_tmp"] = dfc["終了時刻"].replace("24:00", "00:00")
     dfc["Start_dt"] = pd.to_datetime(dfc["日付"] + " " + dfc["開始時刻"])
-    dfc["End_dt"]   = pd.to_datetime(dfc["日付"] + " " + dfc["終了時刻"])
-    dfc.loc[dfc["End_dt"]<dfc["Start_dt"],"End_dt"] += timedelta(days=1)
+    dfc["End_dt"]   = pd.to_datetime(dfc["日付"] + " " + dfc["_end_tmp"])
+    dfc.loc[(dfc["終了時刻"] == "24:00") | (dfc["End_dt"] < dfc["Start_dt"]), "End_dt"] += timedelta(days=1)
+    
     ov = dfc[(ns < dfc["End_dt"]) & (ne > dfc["Start_dt"])]
     if not ov.empty: return True, ov.iloc[0]["カテゴリ"]
     return False,None
 
+# 🚨 "24:00" エラーを回避するように修正
 def merge_continuous(df):
     if df.empty: return df
     d = df.copy()
+    d["_end_tmp"] = d["終了時刻"].replace("24:00", "00:00")
     d["Start_dt"] = pd.to_datetime(d["日付"]+" "+d["開始時刻"])
-    d["End_dt"]   = pd.to_datetime(d["日付"]+" "+d["終了時刻"])
-    d.loc[d["End_dt"]<d["Start_dt"],"End_dt"] += timedelta(days=1)
+    d["End_dt"]   = pd.to_datetime(d["日付"]+" "+d["_end_tmp"])
+    d.loc[(d["終了時刻"] == "24:00") | (d["End_dt"] < d["Start_dt"]), "End_dt"] += timedelta(days=1)
     d = d.sort_values("Start_dt").reset_index(drop=True)
+    
     merged = []
     cur = d.iloc[0].to_dict()
     for i in range(1,len(d)):
@@ -472,7 +475,7 @@ elif mode=="📝 追加":
                     }).execute()
             st.session_state.need_reload=True; st.rerun()
 
-    # 🚨 ここに Google カレンダー同期ボタンを追加！
+    # 🚨 ここに Google カレンダー同期ボタン
     st.markdown("#### 📅 Googleカレンダー同期")
     if st.button(f"✨ {date_str} の予定をGoogleから取り込む", use_container_width=True):
         with st.spinner("Googleカレンダーと通信中...（初回はブラウザで認証画面が開きます）"):
@@ -482,11 +485,9 @@ elif mode=="📝 追加":
             elif events:
                 success_count = 0
                 for event in events:
-                    # 終日イベント（dateTimeがなくdateのみ）はスキップ
                     if 'dateTime' not in event['start']:
                         continue
                     
-                    # 開始時間と終了時間の取得
                     start_dt = datetime.fromisoformat(event['start']['dateTime'])
                     end_dt = datetime.fromisoformat(event['end']['dateTime'])
                     
@@ -494,7 +495,6 @@ elif mode=="📝 追加":
                     e_str = end_dt.strftime('%H:%M')
                     title = event.get('summary', '予定なし')
                     
-                    # カレンダーの予定が重なっていないかチェック
                     ov, _ = check_overlap(date_str, s_str, e_str, ui_log)
                     if not ov:
                         supabase.table("timeline_data").insert({
