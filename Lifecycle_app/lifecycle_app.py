@@ -65,8 +65,11 @@ if "code" in st.query_params and "state" in st.query_params:
     flow = create_oauth_flow(REDIRECT_URI)
     if flow:
         try:
-            # 引換券(code)を使って、正式な通行証(トークン)を取得
-            flow.fetch_token(code=auth_code)
+            # ★【変更点】ボタンを押した時に保存した合言葉をセッションから持ってくる
+            saved_verifier = st.session_state.get("google_code_verifier")
+            
+            # 引換券(code)と合言葉(code_verifier)を使って、正式な通行証(トークン)を取得
+            flow.fetch_token(code=auth_code, code_verifier=saved_verifier)
             creds = flow.credentials
             
             # そのユーザー専用の通行証をSupabaseのusersテーブルに保存！
@@ -76,12 +79,11 @@ if "code" in st.query_params and "state" in st.query_params:
             st.session_state.current_user = callback_user
             st.session_state["oauth_success"] = True
             
-            # 【変更点】成功した時だけURLを綺麗にして画面をリロードする
+            # URLのパラメータを綺麗に消去して画面をリロード
             st.query_params.clear()
             st.rerun()
             
         except Exception as e:
-            # 【変更点】エラーが起きたらここでストップして画面に表示！
             st.error(f"⚠️ 連携の保存中にエラーが発生しました: {e}")
             st.stop()
 
@@ -541,8 +543,24 @@ elif mode=="📝 追加":
                     }).execute()
             st.session_state.need_reload=True; st.rerun()
 
-    # 🚨 【新機能】ユーザー個別の Google カレンダー同期セクション
+  # 🚨 【新機能】ユーザー個別の Google カレンダー同期セクション
     st.markdown("#### 📅 Googleカレンダー同期")
+    
+    # ログインユーザーが既にGoogleと連携しているか調べる
+    res_token = supabase.table("users").select("google_token").eq("user_name", user_name).execute()
+    has_token = res_token.data[0]["google_token"] if (res_token.data and res_token.data[0]["google_token"]) else None
+    
+    if not has_token:
+        st.info("💡 各自のGoogleアカウントの予定を取り込むには、最初に以下のボタンから連携を行ってください。")
+        flow = create_oauth_flow(REDIRECT_URI)
+        if flow:
+            # 毎回確実にリフレッシュトークン（自動更新鍵）をもらうための設定
+            auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline', state=user_name)
+            
+            # ★【変更点】Googleに飛ぶ前に、自動生成された合言葉をセッションに形見として残す
+            st.session_state["google_code_verifier"] = flow.code_verifier
+            
+            st.link_button("🔗 Googleアカウントと連携する", auth_url, use_container_width=True)
     
     # ログインユーザーが既にGoogleと連携しているか調べる
     res_token = supabase.table("users").select("google_token").eq("user_name", user_name).execute()
