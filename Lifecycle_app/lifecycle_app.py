@@ -28,10 +28,8 @@ st.set_page_config(page_title="ライフログ",
 PRODUCTION_URL = "https://lifecycle-mx4bnjpzzlkefnzrgk89q7.streamlit.app/"
 
 # 実行環境（ローカルPCか本番サーバーか）を自動判定してリダイレクト先を切り替える
-if os.environ.get("STREAMLIT_SERVER_HEADLESS") == "true":
-    REDIRECT_URI = PRODUCTION_URL
-else:
-    REDIRECT_URI = "http://localhost:8501/"
+# 自動判定を消して、直接あなたのアプリのURLを指定します！
+REDIRECT_URI = "https://lifecycle-mx4bnjpzzlkefnzrgk89q7.streamlit.app/"
 
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
