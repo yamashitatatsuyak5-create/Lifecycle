@@ -5,11 +5,13 @@ import plotly.express as px
 from supabase import create_client, Client
 import hashlib
 
-# 🚨 Google Calendar API 用のライブラリ（クラウド用に整理）
+# 🚨 Google Calendar API 用のライブラリ
 import json
+import os
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import Flow
 
 # -------------------------------------------------
 # ページ設定
@@ -19,11 +21,68 @@ st.set_page_config(page_title="ライフログ",
                    initial_sidebar_state="collapsed")
 
 # -------------------------------------------------
+# ⚙️ ユーザー個別連携用の設定（★ここを書き換えてください！）
+# -------------------------------------------------
+# あなたのStreamlit CloudアプリのURL（末尾の / まで正確に！）
+# 例: "https://lifelog-app.streamlit.app/"
+PRODUCTION_URL = "https://lifecycle-mx4bnjpzzlkefnzrgk89q7.streamlit.app/"
+
+# 実行環境（ローカルPCか本番サーバーか）を自動判定してリダイレクト先を切り替える
+if os.environ.get("STREAMLIT_SERVER_HEADLESS") == "true":
+    REDIRECT_URI = PRODUCTION_URL
+else:
+    REDIRECT_URI = "http://localhost:8501/"
+
+SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+
+# -------------------------------------------------
 # Supabase 接続
 # -------------------------------------------------
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# -------------------------------------------------
+# 🌐 Google OAuth フロー生成関数
+# -------------------------------------------------
+def create_oauth_flow(redirect_uri):
+    if "GOOGLE_CREDENTIALS" not in st.secrets:
+        st.error("⚠️ StreamlitのSecretsに 'GOOGLE_CREDENTIALS' が設定されていません。")
+        return None
+    client_config = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+    return Flow.from_client_config(
+        client_config,
+        scopes=SCOPES,
+        redirect_uri=redirect_uri
+    )
+
+# -------------------------------------------------
+# 📥 Googleからの認証戻り（コールバック）をキャッチする魔法の処理
+# -------------------------------------------------
+# Googleでの許可が終わると、URLの末尾に code と state（ユーザー名）がついて戻ってきます
+if "code" in st.query_params and "state" in st.query_params:
+    auth_code = st.query_params["code"]
+    callback_user = st.query_params["state"]
+    
+    flow = create_oauth_flow(REDIRECT_URI)
+    if flow:
+        try:
+            # 引換券(code)を使って、正式な通行証(トークン)を取得
+            flow.fetch_token(code=auth_code)
+            creds = flow.credentials
+            
+            # そのユーザー専用の通行証をSupabaseのusersテーブルに保存！
+            supabase.table("users").update({"google_token": creds.to_json()}).eq("user_name", callback_user).execute()
+            
+            # セッションを復元し、成功フラグを立てる
+            st.session_state.current_user = callback_user
+            st.session_state["oauth_success"] = True
+        except Exception as e:
+            st.error(f"Google連携中にエラーが発生しました: {e}")
+            
+    # URLのパラメータを綺麗に消去して画面をリロード
+    st.query_params.clear()
+    st.rerun()
 
 # -------------------------------------------------
 # CSS ＆ デザイン調整
@@ -149,26 +208,34 @@ dynamic_colors = {c: PASTEL_PALETTE[i%len(PASTEL_PALETTE)] for i,c in enumerate(
 cat_others = "その他 💬" if "その他 💬" in st.session_state.categories else "その他"
 if cat_others not in dynamic_colors: dynamic_colors[cat_others] = "#E0E0E0"
 
-# -------------------------------------------------
-# 🚀 Googleカレンダー取得関数（クラウド完全対応版）
-# -------------------------------------------------
-SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+# 連携完了メッセージの表示（リロード後用）
+if st.session_state.get("oauth_success"):
+    st.success("🎉 Googleアカウントとの連携が完了しました！これでカレンダーから予定を取り込めます。")
+    del st.session_state["oauth_success"]
 
+# -------------------------------------------------
+# 🚀 Googleカレンダー取得関数（ユーザー個別対応版）
+# -------------------------------------------------
 def fetch_gcal_events(target_date):
-    # SecretsにGOOGLE_TOKENがあるか確認
-    if "GOOGLE_TOKEN" not in st.secrets:
-        return None, "⚠️ StreamlitのSecretsに 'GOOGLE_TOKEN' が設定されていません。"
+    # Supabaseから「ログインしている人専用の通行証」を引っ張ってくる
+    res = supabase.table("users").select("google_token").eq("user_name", user_name).execute()
+    if not res.data or not res.data[0]["google_token"]:
+        return None, "⚠️ Googleアカウントと連携されていません。先に連携を完了させてください。"
     
     try:
-        # SecretsからJSON文字列を読み込んで辞書に変換
-        token_info = json.loads(st.secrets["GOOGLE_TOKEN"])
-        
-        # 辞書データから認証情報（通行証）を復元
+        token_info = json.loads(res.data[0]["google_token"])
         creds = Credentials.from_authorized_user_info(token_info, SCOPES)
         
-        # 通行証の期限が切れていたら、新しいものを再発行（自動）
+        # 通行証の期限が切れていたら自動でリフレッシュ
         if creds.expired and creds.refresh_token:
+            client_config = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+            creds.client_id = client_config["web"]["client_id"]
+            creds.client_secret = client_config["web"]["client_secret"]
+            creds.token_uri = client_config["web"]["token_uri"]
+            
             creds.refresh(Request())
+            # 新しくなった通行証をSupabaseに上書き保存
+            supabase.table("users").update({"google_token": creds.to_json()}).eq("user_name", user_name).execute()
 
         # Googleカレンダーにアクセス
         service = build('calendar', 'v3', credentials=creds)
@@ -183,7 +250,7 @@ def fetch_gcal_events(target_date):
         return events_result.get('items', []), None
         
     except Exception as e:
-        return None, f"エラーが発生しました: {e}"
+        return None, f"Googleカレンダーの取得に失敗しました: {e}"
 
 # -------------------------------------------------
 # 共通関数
@@ -473,44 +540,61 @@ elif mode=="📝 追加":
                     }).execute()
             st.session_state.need_reload=True; st.rerun()
 
-    # 🚨 ここに Google カレンダー同期ボタン
+    # 🚨 【新機能】ユーザー個別の Google カレンダー同期セクション
     st.markdown("#### 📅 Googleカレンダー同期")
-    if st.button(f"✨ {date_str} の予定をGoogleから取り込む", use_container_width=True):
-        with st.spinner("Googleカレンダーと通信中..."):
-            events, err = fetch_gcal_events(st.session_state.target_date)
-            if err:
-                st.error(err)
-            elif events is not None:
-                success_count = 0
-                for event in events:
-                    if 'dateTime' not in event['start']:
-                        continue
-                    
-                    start_dt = datetime.fromisoformat(event['start']['dateTime'])
-                    end_dt = datetime.fromisoformat(event['end']['dateTime'])
-                    
-                    s_str = start_dt.strftime('%H:%M')
-                    e_str = end_dt.strftime('%H:%M')
-                    title = event.get('summary', '予定なし')
-                    
-                    ov, _ = check_overlap(date_str, s_str, e_str, ui_log)
-                    if not ov:
-                        supabase.table("timeline_data").insert({
-                            "user_name": user_name,
-                            "date": date_str,
-                            "start_time": s_str,
-                            "end_time": e_str,
-                            "category": cat_others,
-                            "detail": f"🗓️ {title}"
-                        }).execute()
-                        success_count += 1
-                
-                if success_count > 0:
-                    st.session_state.need_reload = True
-                    st.success(f"🎉 {success_count}件の予定を取り込みました！")
-                    st.rerun()
-                else:
-                    st.info("取り込める新しい予定はありませんでした（既存の予定との重複、または終日予定を除外しました）。")
+    
+    # ログインユーザーが既にGoogleと連携しているか調べる
+    res_token = supabase.table("users").select("google_token").eq("user_name", user_name).execute()
+    has_token = res_token.data[0]["google_token"] if (res_token.data and res_token.data[0]["google_token"]) else None
+    
+    if not has_token:
+        st.info("💡 各自のGoogleアカウントの予定を取り込むには、最初に以下のボタンから連携を行ってください。")
+        flow = create_oauth_flow(REDIRECT_URI)
+        if flow:
+            # 毎回確実にリフレッシュトークン（自動更新鍵）をもらうための設定
+            # state にログイン中のユーザー名を入れてGoogleに渡すことで、戻ってきたときに誰のトークンか判別させます
+            auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline', state=user_name)
+            st.link_button("🔗 Googleアカウントと連携する", auth_url, use_container_width=True)
+    else:
+        col_sync, col_unlink = st.columns([3, 1])
+        with col_sync:
+            if st.button(f"✨ {date_str} の予定をGoogleから取り込む", use_container_width=True):
+                with st.spinner("Googleカレンダーと通信中..."):
+                    events, err = fetch_gcal_events(st.session_state.target_date)
+                    if err:
+                        st.error(err)
+                    elif events is not None:
+                        success_count = 0
+                        for event in events:
+                            if 'dateTime' not in event['start']: continue
+                            
+                            start_dt = datetime.fromisoformat(event['start']['dateTime'])
+                            end_dt = datetime.fromisoformat(event['end']['dateTime'])
+                            
+                            s_str = start_dt.strftime('%H:%M')
+                            e_str = end_dt.strftime('%H:%M')
+                            title = event.get('summary', '予定なし')
+                            
+                            ov, _ = check_overlap(date_str, s_str, e_str, ui_log)
+                            if not ov:
+                                supabase.table("timeline_data").insert({
+                                    "user_name": user_name, "date": date_str,
+                                    "start_time": s_str, "end_time": e_str,
+                                    "category": cat_others, "detail": f"🗓️ {title}"
+                                }).execute()
+                                success_count += 1
+                        
+                        if success_count > 0:
+                            st.session_state.need_reload = True
+                            st.success(f"🎉 {success_count}件の予定を取り込みました！")
+                            st.rerun()
+                        else:
+                            st.info("取り込める新しい予定はありませんでした。")
+        with col_unlink:
+            if st.button("❌ 連携解除", use_container_width=True, help="Googleとの連携設定を消去します"):
+                supabase.table("users").update({"google_token": None}).eq("user_name", user_name).execute()
+                st.session_state.need_reload = True
+                st.rerun()
 
 # 3. 📊 分析モード
 elif mode=="📊 分析":
