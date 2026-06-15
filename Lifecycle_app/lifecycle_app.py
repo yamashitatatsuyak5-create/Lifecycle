@@ -543,29 +543,14 @@ elif mode=="📝 追加":
                     }).execute()
             st.session_state.need_reload=True; st.rerun()
 
-  # 🚨 【新機能】ユーザー個別の Google カレンダー同期セクション
+ # 🚨 【新機能】ユーザー個別の Google カレンダー同期セクション
     st.markdown("#### 📅 Googleカレンダー同期")
     
     # ログインユーザーが既にGoogleと連携しているか調べる
     res_token = supabase.table("users").select("google_token").eq("user_name", user_name).execute()
     has_token = res_token.data[0]["google_token"] if (res_token.data and res_token.data[0]["google_token"]) else None
     
-    if not has_token:
-        st.info("💡 各自のGoogleアカウントの予定を取り込むには、最初に以下のボタンから連携を行ってください。")
-        flow = create_oauth_flow(REDIRECT_URI)
-        if flow:
-            # 毎回確実にリフレッシュトークン（自動更新鍵）をもらうための設定
-            auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline', state=user_name)
-            
-            # ★【変更点】Googleに飛ぶ前に、自動生成された合言葉をセッションに形見として残す
-            st.session_state["google_code_verifier"] = flow.code_verifier
-            
-            st.link_button("🔗 Googleアカウントと連携する", auth_url, use_container_width=True)
-    
-    # ログインユーザーが既にGoogleと連携しているか調べる
-    res_token = supabase.table("users").select("google_token").eq("user_name", user_name).execute()
-    has_token = res_token.data[0]["google_token"] if (res_token.data and res_token.data[0]["google_token"]) else None
-    
+    # --- 【整理済】ここから1つのキレイな分岐にまとめました ---
     if not has_token:
         st.info("💡 各自のGoogleアカウントの予定を取り込むには、最初に以下のボタンから連携を行ってください。")
         flow = create_oauth_flow(REDIRECT_URI)
@@ -573,8 +558,14 @@ elif mode=="📝 追加":
             # 毎回確実にリフレッシュトークン（自動更新鍵）をもらうための設定
             # state にログイン中のユーザー名を入れてGoogleに渡すことで、戻ってきたときに誰のトークンか判別させます
             auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline', state=user_name)
+            
+            # ★ Googleに飛ぶ前に、自動生成された合言葉をセッションにしっかり保存
+            st.session_state["google_code_verifier"] = flow.code_verifier
+            
             st.link_button("🔗 Googleアカウントと連携する", auth_url, use_container_width=True)
+            
     else:
+        # すでに連携済みの場合は、「取り込み」と「連携解除」ボタンを表示します
         col_sync, col_unlink = st.columns([3, 1])
         with col_sync:
             if st.button(f"✨ {date_str} の予定をGoogleから取り込む", use_container_width=True):
@@ -609,6 +600,7 @@ elif mode=="📝 追加":
                             st.rerun()
                         else:
                             st.info("取り込める新しい予定はありませんでした。")
+                            
         with col_unlink:
             if st.button("❌ 連携解除", use_container_width=True, help="Googleとの連携設定を消去します"):
                 supabase.table("users").update({"google_token": None}).eq("user_name", user_name).execute()
